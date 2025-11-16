@@ -148,29 +148,23 @@ func initStorage() error {
 
 // saveStatsWithStorage saves stats using the configured storage
 func saveStatsWithStorage() {
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
-
-	if err := storage.SaveStats(&requestStats); err != nil {
+	stats := atomicStats.ToRequestStats()
+	if err := storage.SaveStats(&stats); err != nil {
 		Error("Error saving stats: %v", err)
 	}
 }
 
 // loadStatsWithStorage loads stats using the configured storage
-func loadStatsWithStorage() {
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
-
+func loadStatsWithStorage() *RequestStats {
 	stats, err := storage.LoadStats()
 	if err != nil {
 		Error("Error loading stats: %v", err)
-		// Initialize with empty stats if loading fails
-		requestStats = RequestStats{
+		// Return empty stats if loading fails
+		return &RequestStats{
 			RequestHistory: []RequestRecord{},
 		}
-		return
 	}
 
-	requestStats = *stats
-	Info("Successfully loaded %d request records", len(requestStats.RequestHistory))
+	Info("Successfully loaded %d request records", len(stats.RequestHistory))
+	return stats
 }

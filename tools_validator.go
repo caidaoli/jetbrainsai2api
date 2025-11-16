@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -18,9 +17,8 @@ const (
 
 var (
 	paramNameRegex = regexp.MustCompile(ParamNamePattern)
-	// 缓存已验证的工具定义，避免重复验证
-	validatedToolsCache  = make(map[string][]Tool)
-	validationCacheMutex sync.RWMutex
+	// 使用 LRU 缓存代替手动管理的 map，避免内存泄漏和低效的清理逻辑
+	validatedToolsCache = NewCache()
 	// 预编译的参数转换缓存
 	paramTransformCache = NewCache()
 )
@@ -34,13 +32,12 @@ func validateAndTransformTools(tools []Tool) ([]Tool, error) {
 	// 生成缓存键
 	cacheKey := generateToolsCacheKey(tools)
 
-	// 检查缓存
-	validationCacheMutex.RLock()
-	if cached, exists := validatedToolsCache[cacheKey]; exists {
-		validationCacheMutex.RUnlock()
-		return cached, nil
+	// 检查 LRU 缓存
+	if cached, found := validatedToolsCache.Get(cacheKey); found {
+		RecordCacheHit()
+		return cached.([]Tool), nil
 	}
-	validationCacheMutex.RUnlock()
+	RecordCacheMiss()
 
 	// Debug("=== TOOL VALIDATION DEBUG START ===")
 	// Debug("Original tools count: %d", len(tools))
@@ -86,18 +83,8 @@ func validateAndTransformTools(tools []Tool) ([]Tool, error) {
 	// Debug("Final validated tools: %s", toJSONString(validatedTools))
 	// Debug("=== TOOL VALIDATION DEBUG END ===")
 
-	// 缓存验证结果
-	validationCacheMutex.Lock()
-	validatedToolsCache[cacheKey] = validatedTools
-	// 限制缓存大小，避免内存泄漏
-	if len(validatedToolsCache) > 100 {
-		// 清理最旧的缓存项
-		for k := range validatedToolsCache {
-			delete(validatedToolsCache, k)
-			break
-		}
-	}
-	validationCacheMutex.Unlock()
+	// 缓存验证结果到 LRU 缓存（自动管理大小和过期）
+	validatedToolsCache.Set(cacheKey, validatedTools, 30*time.Minute)
 
 	return validatedTools, nil
 }

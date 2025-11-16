@@ -4,220 +4,214 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-这是一个用 Go 语言编写的高性能 JetBrains AI 转 OpenAI 兼容 API 的代理服务器。它使用 Gin 框架，支持将 JetBrains AI 接口转换为 OpenAI 格式，方便与现有 OpenAI 客户端集成，并包含一个用于监控和统计的前端界面。
+JetBrains AI 转 OpenAI 兼容 API 的代理服务器。核心功能：API 格式转换、账户池管理、工具调用优化、性能监控。
 
-**重要**: 项目已完成重大重构 (v2024.8)，统一使用 ByteDance Sonic JSON 库，提升 JSON 序列化性能 2-5x，并消除了代码重复。
+**关键技术栈**: Go 1.23+, Gin, ByteDance Sonic (JSON), Redis (可选缓存)
 
 ## 开发命令
 
-### 本地开发
+### 构建和运行
 ```bash
-# 下载依赖
-go mod download
+# 依赖管理
+go mod download && go mod tidy
 
-# 验证依赖
-go mod verify
-
-# 整理依赖
-go mod tidy
-
-# 构建可执行文件
+# 构建
 go build -o jetbrainsai2api *.go
 
-# 直接运行源码（开发时推荐）
-go run *.go
+# 开发运行（推荐）
+GIN_MODE=debug go run *.go
 
-# 运行构建后的可执行文件（默认端口 7860）
-./jetbrainsai2api
-
-# 开发模式运行（带详细调试信息）
-GIN_MODE=debug ./jetbrainsai2api
-
-# 生产模式运行
+# 生产运行
 GIN_MODE=release ./jetbrainsai2api
 
-# 代码格式化
-go fmt ./...
-
 # 代码检查
-go vet ./...
+go fmt ./... && go vet ./...
+```
+
+### 测试
+```bash
+# 运行所有测试
+go test -v ./...
+
+# 运行特定测试
+go test -v -run TestRequestProcessor_ProcessMessages
+
+# 带 Redis 的测试（需要本地 Redis）
+REDIS_URL="redis://localhost:6379" go test -v -run TestInitStorage
+
+# 测试覆盖率
+go test -cover ./...
 ```
 
 ### 环境配置
-```bash
-# 复制并编辑环境变量文件
-cp .env.example .env
-# 编辑 .env 文件，配置必要的 API 密钥和账户信息
-```
-
-### Docker 部署
-```bash
-# 构建 Docker 镜像
-docker build -t jetbrainsai2api .
-
-# 运行 Docker 容器
-docker run -p 7860:7860 \
-  -e TZ=Asia/Shanghai \
-  -e CLIENT_API_KEYS=your-api-key \
-  -e JETBRAINS_LICENSE_IDS=your-license-id \
-  -e JETBRAINS_AUTHORIZATIONS=your-auth-token \
-  jetbrainsai2api
-
-# 使用 docker-compose
-docker-compose up -d
-```
+必须配置 `.env` 文件（参考 `.env.example`）：
+- `CLIENT_API_KEYS`: 客户端认证密钥（逗号分隔）
+- `JETBRAINS_LICENSE_IDS` + `JETBRAINS_AUTHORIZATIONS`: 许可证模式（推荐）
+- `JETBRAINS_JWTS`: 静态 JWT 模式（会过期）
+- `GIN_MODE`: debug/release/test
+- `REDIS_URL`: 可选，用于分布式缓存
 
 ## 核心架构
 
-### 项目文件结构
-- `main.go`: 主程序入口，HTTP 服务器初始化、信号处理
-- `logger.go`: 统一日志管理系统，支持分级日志输出 (**最新**)
-- `routes.go`: API 路由定义和中间件配置（CORS、请求超时等）
-- `handlers.go`: HTTP 请求处理器，包含认证逻辑和工具调用处理
-- `jetbrains_api.go`: JetBrains API 交互和账户管理，JWT 刷新机制
-- `converter.go`: OpenAI 与 JetBrains API 格式转换，消息类型处理
-- `response_handler.go`: 响应处理，支持流式和非流式输出
-- `tools_validator.go`: 工具参数验证和转换，确保 JetBrains API 兼容性
-- `image_validator.go`: 图像验证和处理，支持 v8 API 中的媒体消息
-- `models.go`: 数据结构定义（请求、响应、账户等模型）
-- `config.go`: 配置文件加载（models.json），模型映射管理
-- `stats.go`: 统计数据收集和管理，QPS 监控、成功率统计
-- `storage.go`: 数据持久化存储，统计数据异步保存
-- `cache.go`: LRU 缓存实现，提供消息转换、工具验证和配额查询缓存
-- `performance.go`: 性能监控功能，错误率计算和指标收集
-- `utils.go`: 工具函数，包含通用辅助方法
+### 三层架构设计
 
-### 核心组件
-
-- **HTTP 服务器** (`main.go`): 基于 Gin 框架，优雅停机处理
-- **统一日志系统** (`logger.go`): 基于接口的分级日志管理 (**最新**)
-  - Debug/Info/Warn/Error/Fatal 统一接口
-  - 自动调试模式检测，仅在 debug 模式下输出调试日志
-  - 消除47处重复的调试检查模式，显著提升代码可维护性
-- **统一 JSON 处理** (`cache.go` `marshalJSON`): 全面使用 ByteDance Sonic 库，提升性能 2-5x
-- **账户池管理** (`jetbrains_api.go`): 
-  - 多账户负载均衡和故障转移
-  - 智能 JWT 刷新（过期前12小时自动刷新）
-  - 配额实时监控和账户健康检查
-  - 支持静态 JWT 和许可证两种认证模式
-- **LRU 缓存系统** (`cache.go`):
-  - 消息转换缓存 (10分钟 TTL)
-  - 工具验证缓存 (30分钟 TTL) 
-  - 配额查询缓存 (1小时 TTL)
-  - 可选 Redis 支持，提高分布式性能
-- **API 格式转换** (`converter.go`):
-  - OpenAI 与 JetBrains API 双向格式转换
-  - 支持多种消息类型和复杂参数结构
-  - 图像内容验证和处理 (`image_validator.go`)
-- **工具调用优化** (`tools_validator.go`):
-  - 智能工具参数验证和名称规范化
-  - 复杂 JSON Schema 结构自动简化（anyOf/oneOf/allOf）
-  - 强制工具使用机制，提高调用成功率
-  - **重构亮点**: 统一使用 Sonic 库，移除 encoding/json 依赖
-- **性能监控** (`stats.go`, `performance.go`):
-  - 实时 QPS、响应时间、成功率统计
-  - 错误率计算和异常检测
-  - Web 界面监控面板 (`static/index.html`)
-  - 统计数据持久化存储 (`storage.go`)
-
-## 重构关键点 (最新)
-
-### 统一日志处理系统重构
-- **新增**: `logger.go` - 统一的日志管理系统
-- **解决**: 消除47处重复的 `if IsDebug() { log.Printf(...) }` 模式
-- **改进**: 统一使用 Debug/Info/Warn/Error/Fatal 接口替代分散的日志调用
-- **现代化**: 将 `interface{}` 替换为 `any` 类型别名
-- **性能优化**: 减少条件检查开销，提升调试模式性能
-- **架构原则**: 严格遵循 SOLID 原则 (SRP/OCP/DIP) 和 DRY/KISS 设计哲学
-
-### JSON 序列化优化 (v2024.8)
-- **问题**: 代码中混用 `encoding/json` 和 `github.com/bytedance/sonic`
-- **解决**: 统一使用 `marshalJSON` 函数封装 Sonic 库
-- **影响文件**: `tools_validator.go`, `cache.go`, `converter.go`
-- **性能提升**: JSON 序列化性能提升 2-5x
-
-### 代码一致性改进
-- 消除重复的 JSON 处理逻辑
-- 统一错误处理模式
-- 移除未使用的导入（如 `encoding/json`）
-- 强化类型安全检查
-
-## 重要配置文件
-
-### models.json
-定义可用模型及其映射关系，支持以下模型类型：
-- **Anthropic Claude**: claude-4-opus, claude-4-sonnet, claude-3-7-sonnet 等
-- **Google Gemini**: gemini-2.5-pro, gemini-2.5-flash
-- **OpenAI**: o4-mini, o3-mini, o3, o1, gpt-4o, gpt-4.1 系列
-
-格式：`"api_model_id": "jetbrains_internal_model_id"`
-
-### .env 文件
-必须配置的环境变量（参考 `.env.example`）：
-- `CLIENT_API_KEYS`: 客户端 API 密钥（逗号分隔）
-- `JETBRAINS_JWTS`: JWT token（逗号分隔，用于静态 JWT 模式）
-- `JETBRAINS_LICENSE_IDS`: JetBrains 许可证 ID（逗号分隔，用于许可证模式）
-- `JETBRAINS_AUTHORIZATIONS`: 对应许可证的授权 token（逗号分隔）
-- `PORT`: 服务端口（默认 7860）
-- `GIN_MODE`: Gin 框架模式（debug/release/test）
-- `REDIS_URL`: Redis 连接 URL（可选，用于缓存）
-
-支持三种账户配置模式：
-1. **静态 JWT 模式**: 只设置 `JETBRAINS_JWTS`
-2. **许可证模式**: 设置 `JETBRAINS_LICENSE_IDS` 和 `JETBRAINS_AUTHORIZATIONS`
-3. **混合模式**: 可同时配置多种方式的账户
-
-## 调试和故障排除
-
-### 性能分析和调试工具
-
-- **实时缓存监控**: 通过统计面板查看缓存命中率和性能指标
-- **错误率监控**: `performance.go` 提供错误率计算和异常检测
-- **JSON 性能监控**: 重构后使用 Sonic 库，可通过 expvar 监控序列化性能
-
-### 日志和监控
-- 设置 `GIN_MODE=debug` 启用详细日志
-- 访问 `/` 查看实时统计面板
-- 使用 `/api/stats` 获取 JSON 格式的统计数据
-- 使用 `/api/health` 检查服务健康状态
-
-### 常见问题
-- **JSON 序列化错误**: 确保所有文件都使用 `marshalJSON` 函数而非直接调用 `json.Marshal`
-- **JWT 过期**: 服务会自动刷新 JWT token（过期前12小时），检查许可证配置
-- **配额不足**: 查看统计面板中的配额信息，考虑添加更多账户
-- **模型不可用**: 检查 `models.json` 中的模型映射配置
-- **缓存问题**: 检查 Redis 连接状态，LRU 缓存会自动降级到内存
-- **账户池耗尽**: 所有账户都不可用时，检查账户配置和网络连接
-- **工具调用失败**: 
-  - 检查工具参数名称是否符合规范（最大64字符，仅支持字母数字和 `_.-`）
-  - 启用调试模式 `GIN_MODE=debug` 查看详细的工具验证和转换日志
-  - 复杂嵌套参数会自动简化，检查转换后的参数结构
-  - 确保 `tool_choice` 参数正确设置（支持 "auto", "required", "any" 等）
-
-### 开发最佳实践
-- **日志处理**: 始终使用统一的 Debug/Info/Warn/Error/Fatal 接口，不要直接调用 log.Printf (**最新**)
-- **JSON 处理**: 始终使用 `marshalJSON` 函数，不要直接调用 `sonic.Marshal`
-- **类型声明**: 使用现代化的 `any` 类型别名替代 `interface{}`
-- **缓存键生成**: 使用现有的缓存键生成函数，确保一致性
-- **错误处理**: 遵循项目中统一的错误处理模式
-- **性能考虑**: 利用现有的缓存系统，避免重复计算
-
-## 部署命令
-
-### Docker 部署
-```bash
-# 构建 Docker 镜像
-docker build -t jetbrainsai2api .
-
-# 运行 Docker 容器
-docker run -p 7860:7860 \
-  -e TZ=Asia/Shanghai \
-  -e CLIENT_API_KEYS=your-api-key \
-  -e JETBRAINS_JWTS=your-jwt-token \
-  jetbrainsai2api
+```
+HTTP 请求 → Server → RequestProcessor → JetBrains API
+              ↓            ↓
+         AccountManager  Cache
 ```
 
-### HuggingFace Spaces 部署
-- Fork 项目到 GitHub
-- 在 HuggingFace Spaces 创建新的 Space (使用 Docker SDK)
-- 连接 GitHub 仓库并配置环境变量
+**Server** (`server.go`):
+- HTTP 服务器和路由管理
+- 中间件：CORS、认证、超时控制
+- 优雅停机和健康检查
+- 依赖注入：AccountManager, RequestProcessor
+
+**RequestProcessor** (`request_processor.go`):
+- 请求预处理：消息转换、工具验证
+- 负责构建 JetBrains API payload
+- 上游请求发送和响应处理
+- 核心方法：
+  - `ProcessMessages()`: OpenAI 消息 → JetBrains 格式
+  - `ProcessTools()`: 工具参数验证和规范化
+  - `BuildJetbrainsPayload()`: 构建完整请求体
+  - `SendUpstreamRequest()`: 发送上游请求
+
+**AccountManager** (`account_manager.go`):
+- 账户池管理：负载均衡、故障转移
+- JWT 自动刷新（过期前12小时）
+- 配额监控和账户健康检查
+- 接口设计：`AcquireAccount()`, `ReleaseAccount()`, `RefreshJWT()`, `CheckQuota()`
+
+### 关键组件
+
+**格式转换** (`converter.go`, `anthropic_*.go`, `jetbrains_*.go`):
+- OpenAI ↔ JetBrains API 双向转换
+- 支持多种消息类型（text, image, tool_call, tool_result）
+- 流式和非流式响应处理
+- 特殊处理：图像验证 (`image_validator.go`)
+
+**工具调用优化** (`tools_validator.go`):
+- 参数名称规范化（最大64字符，仅 `[a-zA-Z0-9_.-]`）
+- JSON Schema 简化（anyOf/oneOf/allOf → 扁平结构）
+- 强制工具使用机制（`tool_choice` 处理）
+- 缓存验证结果（30分钟 TTL）
+
+**缓存系统** (`cache.go`):
+- LRU 缓存实现，支持 TTL
+- 三种缓存：消息转换(10min)、工具验证(30min)、配额查询(1h)
+- 可选 Redis 后端（分布式场景）
+- 统一 JSON 序列化：`marshalJSON()` 封装 Sonic 库
+
+**性能监控** (`stats.go`, `performance.go`, `storage.go`):
+- 实时指标：QPS、响应时间、成功率、错误率
+- 统计数据异步持久化（防抖机制）
+- Web 监控面板：`/` (HTML), `/api/stats` (JSON)
+
+**统一日志** (`logger.go`):
+- 接口：Debug/Info/Warn/Error/Fatal
+- 自动调试模式检测（仅 debug 模式输出 Debug 日志）
+
+### 数据流
+
+1. **请求流**:
+   ```
+   Client → Server.corsMiddleware → Server.authenticate
+        → handlers.handleChatCompletion
+        → RequestProcessor.ProcessMessages/ProcessTools
+        → RequestProcessor.BuildJetbrainsPayload
+        → AccountManager.AcquireAccount
+        → RequestProcessor.SendUpstreamRequest
+        → response_handler (流式/非流式)
+   ```
+
+2. **账户管理流**:
+   ```
+   启动 → loadJetbrainsAccountsFromEnv
+        → AccountManager.RefreshJWT (后台定时)
+        → AccountManager.CheckQuota (请求时)
+        → 账户池负载均衡
+   ```
+
+3. **缓存流**:
+   ```
+   请求 → 检查缓存 → 命中返回 / 未命中计算
+        → 写入缓存（带 TTL）
+        → 可选写入 Redis
+   ```
+
+## 开发规范
+
+**架构约束**:
+- 依赖方向：`handlers` → `RequestProcessor` → `AccountManager`，禁止反向依赖
+- Server 通过依赖注入持有组件，禁止全局变量
+- 所有外部 API 调用必须通过 `httpClient`（连接池复用）
+- 缓存键必须包含版本号，避免格式变更导致的脏数据
+
+**编码规范**:
+- 日志：使用 `logger.Debug/Info/Warn/Error/Fatal`，禁止 `log.Printf`
+- JSON：使用 `marshalJSON()`，禁止直接调用 `sonic.Marshal` 或 `json.Marshal`
+- 类型：使用 `any` 替代 `interface{}`
+- 错误处理：返回 error，记录上下文（账户ID、请求ID）
+
+**测试要求**:
+- 新功能必须添加单元测试（参考 `request_processor_test.go`）
+- 使用 table-driven tests 模式
+- Mock 外部依赖（JetBrains API、Redis）
+
+## MCP工具使用规范
+
+**⚠️ 强制要求: 优先使用Serena MCP工具**
+
+**代码探索**:
+```
+mcp__serena__get_symbols_overview → mcp__serena__find_symbol(include_body=true)
+```
+
+**代码编辑**(Symbol级别):
+```
+mcp__serena__replace_symbol_body / insert_after_symbol / insert_before_symbol
+```
+
+**代码搜索**:
+```
+mcp__serena__search_for_pattern  # 避免全文件读取
+```
+
+**依赖分析**:
+```
+mcp__serena__find_referencing_symbols  # 查找符号引用
+```
+
+**Token效率原则**:
+- ❌ 禁止: 不加思考使用`Read`读取整个文件
+- ✅ 推荐: Overview → Find Symbol → 精确编辑
+- ⚠️ 标准工具: 仅用于非代码文件(`.md`/`.json`/`.yaml`)
+
+## 配置文件
+
+**models.json**: 模型映射配置
+- 格式：`"openai_model_id": "jetbrains_internal_id"`
+- 支持：Anthropic Claude, Google Gemini, OpenAI GPT 系列
+- 热更新：修改后无需重启（下次请求生效）
+
+**.env**: 环境变量（见 `.env.example`）
+- 三种账户模式：静态 JWT / 许可证 / 混合
+- 推荐许可证模式（支持自动刷新）
+
+## 调试和监控
+
+**本地调试**:
+```bash
+GIN_MODE=debug go run *.go  # 启用详细日志
+```
+
+**监控端点**:
+- `/`: Web 监控面板（实时统计）
+- `/api/stats`: JSON 格式统计数据
+- `/api/health`: 健康检查
+
+**关键日志位置**:
+- 账户管理：`account_manager.go` - JWT 刷新、配额检查
+- 工具验证：`tools_validator.go` - 参数规范化、Schema 简化
+- 请求处理：`request_processor.go` - 消息转换、payload 构建

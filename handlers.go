@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// authenticateClient 客户端认证中间件
-func authenticateClient(c *gin.Context) {
-	if len(validClientKeys) == 0 {
+// authenticateClient 客户端认证中间件（Server 方法）
+func (s *Server) authenticateClient(c *gin.Context) {
+	if len(s.validClientKeys) == 0 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service unavailable: no client API keys configured"})
 		c.Abort()
 		return
@@ -24,7 +23,7 @@ func authenticateClient(c *gin.Context) {
 
 	// Check x-api-key first
 	if apiKey != "" {
-		if validClientKeys[apiKey] {
+		if s.validClientKeys[apiKey] {
 			return
 		}
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid client API key (x-api-key)"})
@@ -35,7 +34,7 @@ func authenticateClient(c *gin.Context) {
 	// Check Authorization header
 	if authHeader != "" {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if validClientKeys[token] {
+		if s.validClientKeys[token] {
 			return
 		}
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid client API key (Bearer token)"})
@@ -47,18 +46,37 @@ func authenticateClient(c *gin.Context) {
 	c.Abort()
 }
 
-// listModels 列出可用模型
-func listModels(c *gin.Context) {
+// listModels 列出可用模型（Server 方法）
+func (s *Server) listModels(c *gin.Context) {
 	modelList := ModelList{
 		Object: "list",
-		Data:   modelsData.Data,
+		Data:   s.modelsData.Data,
 	}
 	c.JSON(http.StatusOK, modelList)
 }
 
-// chatCompletions handles chat completion requests
-func chatCompletions(c *gin.Context) {
+// chatCompletions handles chat completion requests（Server 方法）
+func (s *Server) chatCompletions(c *gin.Context) {
 	startTime := time.Now()
+
+	// Panic 恢复机制，确保资源正确释放
+	var account *JetbrainsAccount
+	var resp *http.Response
+	defer func() {
+		if r := recover(); r != nil {
+			Error("Panic in chatCompletions: %v", r)
+			// 确保资源释放
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+			if account != nil {
+				s.accountManager.ReleaseAccount(account)
+			}
+			recordFailureWithTimer(startTime, "", "")
+			RecordHTTPError()
+			respondWithError(c, http.StatusInternalServerError, "internal server error")
+		}
+	}()
 
 	// 记录性能指标开始
 	defer func() {
@@ -74,178 +92,60 @@ func chatCompletions(c *gin.Context) {
 		return
 	}
 
-	modelConfig := getModelItem(request.Model)
+	modelConfig := getModelItem(s.modelsData, request.Model)
 	if modelConfig == nil {
 		recordFailureWithTimer(startTime, request.Model, "")
 		respondWithError(c, http.StatusNotFound, fmt.Sprintf("Model %s not found", request.Model))
 		return
 	}
 
-	account, err := getNextJetbrainsAccount()
+	// 使用 AccountManager 获取账户
+	var err error
+	account, err = s.accountManager.AcquireAccount(c.Request.Context())
 	if err != nil {
 		recordFailureWithTimer(startTime, request.Model, "")
 		respondWithError(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
-	defer func() {
-		// Return the account to the pool when the function exits
-		select {
-		case accountPool <- account:
-			// Returned successfully
-		default:
-			// Pool is full, which shouldn't happen if managed correctly.
-			Warn("account pool is full. Could not return account.")
-		}
-	}()
+	defer s.accountManager.ReleaseAccount(account)
 
 	accountIdentifier := getTokenDisplayName(account)
 
-	// Convert OpenAI format to JetBrains format with caching
-	messagesCacheKey := generateMessagesCacheKey(request.Messages)
-	jetbrainsMessagesAny, found := messageConversionCache.Get(messagesCacheKey)
-	var jetbrainsMessages []JetbrainsMessage
-	if found {
-		jetbrainsMessages = jetbrainsMessagesAny.([]JetbrainsMessage)
-		RecordCacheHit()
-	} else {
-		jetbrainsMessages = openAIToJetbrainsMessages(request.Messages)
-		messageConversionCache.Set(messagesCacheKey, jetbrainsMessages, 10*time.Minute)
-		RecordCacheMiss()
-	}
+	// 步骤 1: 处理消息转换（使用缓存）
+	// SRP: 职责分离 - 消息处理由 RequestProcessor 负责
+	messagesResult := s.requestProcessor.ProcessMessages(request.Messages)
+	jetbrainsMessages := messagesResult.JetbrainsMessages
 
-	// CRITICAL FIX: Force tool usage when tools are provided
-	if len(request.Tools) > 0 {
-		if request.ToolChoice == nil {
-			request.ToolChoice = "any"
-			Debug("FORCING tool_choice to 'any' for tool usage guarantee")
-		}
-	}
-
-	var data []JetbrainsData
-	if len(request.Tools) > 0 {
-		toolsCacheKey := generateToolsCacheKey(request.Tools)
-		validatedToolsAny, found := toolsValidationCache.Get(toolsCacheKey)
-		var validatedTools []Tool
-		if found {
-			validatedTools = validatedToolsAny.([]Tool)
-			RecordCacheHit()
-		} else {
-			validationStart := time.Now()
-			var validationErr error
-			validatedTools, validationErr = validateAndTransformTools(request.Tools)
-			validationDuration := time.Since(validationStart)
-			RecordToolValidation(validationDuration)
-
-			if validationErr != nil {
-				recordFailureWithTimer(startTime, request.Model, accountIdentifier)
-				RecordHTTPError()
-				respondWithError(c, http.StatusBadRequest, fmt.Sprintf("Tool validation failed: %v", validationErr))
-				return
-			}
-			toolsValidationCache.Set(toolsCacheKey, validatedTools, 30*time.Minute)
-			RecordCacheMiss()
-		}
-
-		if len(validatedTools) > 0 {
-			data = append(data, JetbrainsData{Type: "json", FQDN: "llm.parameters.tools"})
-			// 转换为JetBrains格式
-			var jetbrainsTools []JetbrainsToolDefinition
-			for _, tool := range validatedTools {
-				jetbrainsTools = append(jetbrainsTools, JetbrainsToolDefinition{
-					Name:        tool.Function.Name,
-					Description: tool.Function.Description,
-					Parameters: JetbrainsToolParametersWrapper{
-						Schema: tool.Function.Parameters,
-					},
-				})
-			}
-			toolsJSON, marshalErr := marshalJSON(jetbrainsTools)
-			if marshalErr != nil {
-				recordFailureWithTimer(startTime, request.Model, accountIdentifier)
-				respondWithError(c, http.StatusInternalServerError, "Failed to marshal tools")
-				return
-			}
-			Debug("Transformed tools for JetBrains API: %s", string(toolsJSON))
-			data = append(data, JetbrainsData{Type: "json", Value: string(toolsJSON)})
-			// 添加modified字段，模拟preview.json的格式
-			modifiedTime := time.Now().UnixMilli()
-			if len(data) > 1 {
-				// 为第二个data项（工具定义）添加modified字段
-				lastIndex := len(data) - 1
-				modifiedData := JetbrainsData{
-					Type:     data[lastIndex].Type,
-					Value:    data[lastIndex].Value,
-					Modified: modifiedTime,
-				}
-				data[lastIndex] = modifiedData
-			}
-			if shouldForceToolUse(request) {
-				jetbrainsMessages = openAIToJetbrainsMessages(request.Messages)
-				Debug("Using original messages for tool usage")
-			}
-		}
-	}
-	if data == nil {
-		data = []JetbrainsData{}
-	}
-
-	internalModel := getInternalModelName(request.Model)
-	payload := JetbrainsPayload{
-		Prompt:  "ij.chat.request.new-chat-on-start",
-		Profile: internalModel,
-		Chat:    JetbrainsChat{Messages: jetbrainsMessages},
-	}
-
-	// 只有当有数据时才设置 Parameters
-	if len(data) > 0 {
-		payload.Parameters = &JetbrainsParameters{Data: data}
-	}
-
-	payloadBytes, err := marshalJSON(payload)
-	if err != nil {
+	// 步骤 2: 处理工具验证和转换（使用缓存）
+	// SRP: 职责分离 - 工具处理由 RequestProcessor 负责
+	toolsResult := s.requestProcessor.ProcessTools(&request)
+	if toolsResult.Error != nil {
 		recordFailureWithTimer(startTime, request.Model, accountIdentifier)
-		respondWithError(c, http.StatusInternalServerError, "Failed to marshal request")
+		RecordHTTPError()
+		respondWithError(c, http.StatusBadRequest, toolsResult.Error.Error())
 		return
 	}
 
-	Debug("=== JetBrains API Request Debug ===")
-	Debug("Model: %s -> %s", request.Model, internalModel)
-	Debug("Messages processed: %d", len(jetbrainsMessages))
-	Debug("Tools processed: %d", len(request.Tools))
-	Debug("Payload size: %d bytes", len(payloadBytes))
-	Debug("=== Complete Upstream Payload ===")
-	Debug("%s", string(payloadBytes))
-	Debug("=== End Upstream Payload ===")
-	Debug("=== End Debug ===")
-
-	req, err := http.NewRequest("POST", "https://api.jetbrains.ai/user/v5/llm/chat/stream/v8", bytes.NewBuffer(payloadBytes))
+	// 步骤 3: 构建 JetBrains API payload
+	// SRP: 职责分离 - payload 构建由 RequestProcessor 负责
+	payloadBytes, err := s.requestProcessor.BuildJetbrainsPayload(&request, jetbrainsMessages, toolsResult.Data)
 	if err != nil {
 		recordFailureWithTimer(startTime, request.Model, accountIdentifier)
-		respondWithError(c, http.StatusInternalServerError, "Failed to create request")
+		respondWithError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cache-Control", "no-cache")
-	setJetbrainsHeaders(req, account.JWT)
-
-	resp, err := httpClient.Do(req)
+	// 步骤 4: 发送上游请求
+	// SRP: 职责分离 - HTTP 请求发送由 RequestProcessor 负责
+	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, account)
 	if err != nil {
 		recordFailureWithTimer(startTime, request.Model, accountIdentifier)
-		respondWithError(c, http.StatusInternalServerError, "Failed to make request")
+		respondWithError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer resp.Body.Close()
 
-	Debug("JetBrains API Response Status: %d", resp.StatusCode)
-
-	if resp.StatusCode == 477 {
-		Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
-		account.HasQuota = false
-		account.LastQuotaCheck = float64(time.Now().Unix())
-	}
-
+	// 步骤 5: 检查响应状态
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errorMsg := string(body)

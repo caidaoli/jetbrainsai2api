@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +17,9 @@ type LRUCache struct {
 	mu       sync.RWMutex
 	head     *CacheItem
 	tail     *CacheItem
+	// 优雅关闭支持
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // CacheItem represents an item in the cache with LRU links
@@ -30,9 +33,12 @@ type CacheItem struct {
 
 // NewCache creates a new LRU Cache with optimized capacity.
 func NewCache() *LRUCache {
+	ctx, cancel := context.WithCancel(context.Background())
 	cache := &LRUCache{
 		capacity: 1000, // 优化缓存容量
 		items:    make(map[string]*CacheItem),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	// Initialize sentinel nodes
@@ -41,14 +47,32 @@ func NewCache() *LRUCache {
 	cache.head.next = cache.tail
 	cache.tail.prev = cache.head
 
-	// Add a background goroutine to clean up expired items.
-	go func() {
-		for {
-			time.Sleep(5 * time.Minute) // 减少清理频率到5分钟
-			cache.cleanupExpired()
-		}
-	}()
+	// 启动后台清理 goroutine，支持优雅关闭
+	go cache.startCleanupWorker()
 	return cache
+}
+
+// startCleanupWorker 后台清理过期缓存项，支持优雅关闭
+func (c *LRUCache) startCleanupWorker() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.cleanupExpired()
+		case <-c.ctx.Done():
+			// 收到关闭信号，优雅退出
+			return
+		}
+	}
+}
+
+// Stop 停止后台清理 goroutine
+func (c *LRUCache) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
 }
 
 // Set adds an item to the cache, replacing any existing item.
@@ -83,15 +107,19 @@ func (c *LRUCache) Set(key string, value any, duration time.Duration) {
 
 // Get gets an item from the cache. It returns the item or nil, and a bool indicating whether the key was found.
 func (c *LRUCache) Get(key string) (any, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	item, found := c.items[key]
 	if !found {
 		return nil, false
 	}
 
+	// 检查是否过期
 	if time.Now().UnixNano() > item.Expiration {
+		// 立即删除过期项，避免缓存污染
+		c.remove(item)
+		delete(c.items, key)
 		return nil, false
 	}
 
@@ -100,7 +128,8 @@ func (c *LRUCache) Get(key string) (any, bool) {
 	return item.Value, true
 }
 
-// Global cache instances
+// 全局 cache 实例（向后兼容，逐步迁移到依赖注入）
+// 新代码应该使用注入的 Cache 接口
 var (
 	messageConversionCache = NewCache()
 	toolsValidationCache   = NewCache()
@@ -108,26 +137,26 @@ var (
 
 // generateMessagesCacheKey creates a cache key from chat messages.
 func generateMessagesCacheKey(messages []ChatMessage) string {
-	var b strings.Builder
+	// 优化: 使用流式hash，避免大量内存分配
+	h := sha1.New()
 	for _, msg := range messages {
-		b.WriteString(msg.Role)
+		h.Write([]byte(msg.Role))
 		if content, ok := msg.Content.(string); ok {
-			b.WriteString(content)
+			h.Write([]byte(content))
 		}
 	}
-	hash := sha1.Sum([]byte(b.String()))
-	return hex.EncodeToString(hash[:])
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // generateToolsCacheKey creates a cache key from a slice of tools.
 func generateToolsCacheKey(tools []Tool) string {
-	var b strings.Builder
+	// 优化: 使用流式hash，避免大量内存分配
+	h := sha1.New()
 	for _, t := range tools {
-		b.WriteString(t.Type)
-		b.WriteString(t.Function.Name)
+		h.Write([]byte(t.Type))
+		h.Write([]byte(t.Function.Name))
 	}
-	hash := sha1.Sum([]byte(b.String()))
-	return hex.EncodeToString(hash[:])
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // generateParamsCacheKey creates a cache key from parameter schemas

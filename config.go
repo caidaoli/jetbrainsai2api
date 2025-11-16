@@ -1,19 +1,20 @@
 package main
 
 import (
-	"github.com/bytedance/sonic"
+	"fmt"
 	"os"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // loadModels loads model definitions from models.json
-func loadModels() ModelsData {
+func loadModels() (ModelsData, error) {
 	var result ModelsData
 
 	data, err := os.ReadFile("models.json")
 	if err != nil {
-		Error("Error loading models.json: %v", err)
-		return result
+		return result, fmt.Errorf("failed to read models.json: %w", err)
 	}
 
 	var config ModelsConfig
@@ -21,8 +22,7 @@ func loadModels() ModelsData {
 		// Try old format (string array)
 		var modelIDs []string
 		if err := sonic.Unmarshal(data, &modelIDs); err != nil {
-			Error("Error parsing models.json: %v", err)
-			return result
+			return result, fmt.Errorf("failed to parse models.json: %w", err)
 		}
 		// Convert to new format
 		config.Models = make(map[string]string)
@@ -42,74 +42,19 @@ func loadModels() ModelsData {
 	}
 
 	Info("Loaded %d models from models.json", len(config.Models))
-	return result
+	return result, nil
 }
 
-// loadClientAPIKeys loads client API keys from environment variables
-func loadClientAPIKeys() {
-	keys := parseEnvList(os.Getenv("CLIENT_API_KEYS"))
-	validClientKeys = make(map[string]bool)
-	for _, key := range keys {
-		validClientKeys[key] = true
-	}
-
-	if len(validClientKeys) == 0 {
-		Warn("CLIENT_API_KEYS environment variable is empty")
-	} else {
-		Info("Successfully loaded %d client API keys from environment", len(validClientKeys))
-	}
-}
-
-// loadJetbrainsAccounts loads JetBrains account information from environment variables
-func loadJetbrainsAccounts() {
-	licenseIDsEnv := os.Getenv("JETBRAINS_LICENSE_IDS")
-	authorizationsEnv := os.Getenv("JETBRAINS_AUTHORIZATIONS")
-
-	licenseIDs := parseEnvList(licenseIDsEnv)
-	authorizations := parseEnvList(authorizationsEnv)
-
-	maxLen := len(licenseIDs)
-	if len(authorizations) > maxLen {
-		maxLen = len(authorizations)
-	}
-
-	for len(licenseIDs) < maxLen {
-		licenseIDs = append(licenseIDs, "")
-	}
-	for len(authorizations) < maxLen {
-		authorizations = append(authorizations, "")
-	}
-
-	jetbrainsAccounts = []JetbrainsAccount{}
-	for i := 0; i < maxLen; i++ {
-		if licenseIDs[i] != "" && authorizations[i] != "" {
-			account := JetbrainsAccount{
-				LicenseID:      licenseIDs[i],
-				Authorization:  authorizations[i],
-				JWT:            "",
-				LastUpdated:    0,
-				HasQuota:       true,
-				LastQuotaCheck: 0,
-			}
-			jetbrainsAccounts = append(jetbrainsAccounts, account)
-		}
-	}
-
-	if len(jetbrainsAccounts) == 0 {
-		Warn("No valid JetBrains accounts found in environment variables")
-	} else {
-		Info("Successfully loaded %d JetBrains AI accounts from environment", len(jetbrainsAccounts))
-	}
-}
-
-func getInternalModelName(modelID string) string {
-	if internalModel, exists := modelsConfig.Models[modelID]; exists {
+// getInternalModelName 获取内部模型名称（通过配置映射）
+func getInternalModelName(config ModelsConfig, modelID string) string {
+	if internalModel, exists := config.Models[modelID]; exists {
 		return internalModel
 	}
 	return modelID
 }
 
-func getModelItem(modelID string) *ModelInfo {
+// getModelItem 从模型数据中查找指定 ID 的模型
+func getModelItem(modelsData ModelsData, modelID string) *ModelInfo {
 	for _, model := range modelsData.Data {
 		if model.ID == modelID {
 			return &model

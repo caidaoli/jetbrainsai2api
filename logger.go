@@ -66,7 +66,11 @@ func (l *AppLogger) Fatal(format string, args ...any) {
 }
 
 // 全局日志实例 - 延迟初始化
-var appLogger Logger
+var (
+	appLogger     Logger
+	loggerInitMu  sync.Mutex
+	loggerInitOne sync.Once
+)
 
 // Close 安全关闭日志文件句柄
 func (l *AppLogger) Close() error {
@@ -105,10 +109,11 @@ func createDebugFileOutput() (io.Writer, *os.File) {
 }
 
 // InitializeLogger 初始化全局日志系统，必须在加载环境变量后调用
+// 使用 sync.Once 确保只初始化一次，避免并发竞态条件
 func InitializeLogger() {
-	if appLogger == nil {
+	loggerInitOne.Do(func() {
 		appLogger = NewAppLogger()
-	}
+	})
 }
 
 // CloseLogger 全局日志清理函数，供main.go调用
@@ -121,34 +126,25 @@ func CloseLogger() error {
 	return nil
 }
 
-// 全局日志函数 - 自动初始化保护
+// 全局日志函数 - 直接使用全局实例
+// CRITICAL: appLogger 必须在 main.go 中通过 InitializeLogger() 初始化
+// 如果未初始化会 panic，这是正确的行为，能更早发现初始化顺序问题
 func Debug(format string, args ...any) {
-	if appLogger == nil {
-		InitializeLogger()
-	}
 	appLogger.Debug(format, args...)
 }
+
 func Info(format string, args ...any) {
-	if appLogger == nil {
-		InitializeLogger()
-	}
 	appLogger.Info(format, args...)
 }
+
 func Warn(format string, args ...any) {
-	if appLogger == nil {
-		InitializeLogger()
-	}
 	appLogger.Warn(format, args...)
 }
+
 func Error(format string, args ...any) {
-	if appLogger == nil {
-		InitializeLogger()
-	}
 	appLogger.Error(format, args...)
 }
+
 func Fatal(format string, args ...any) {
-	if appLogger == nil {
-		InitializeLogger()
-	}
 	appLogger.Fatal(format, args...)
 }

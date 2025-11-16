@@ -1,129 +1,127 @@
 package main
 
 import (
-	"net"
-	"net/http"
 	"os"
-	"os/signal"
-	"sync"
-	"syscall"
-	"time"
-
-	"github.com/bytedance/sonic"
 
 	"github.com/joho/godotenv"
 )
 
 const (
-	DefaultRequestTimeout = 5 * time.Minute // 增加到5分钟，适应长响应
-	QuotaCacheTime        = time.Hour
-	JWTRefreshTime        = 12 * time.Hour
+	DefaultRequestTimeout = 5 * 60    // 5分钟（秒）
+	QuotaCacheTime        = 3600      // 1小时（秒）
+	JWTRefreshTime        = 12 * 3600 // 12小时（秒）
 )
 
-// Global variables
+// 保留少量必要的全局变量（兼容性）
+// 这些将在后续版本中完全移除
 var (
-	validClientKeys   = make(map[string]bool)
-	jetbrainsAccounts []JetbrainsAccount
-	accountPool       chan *JetbrainsAccount // 新增账户池通道
-	modelsData        ModelsData
-	modelsConfig      ModelsConfig
-	httpClient        *http.Client
-	requestStats      RequestStats
-	statsMutex        sync.Mutex
-
 	accountQuotaCache = make(map[string]*CachedQuotaInfo)
-	quotaCacheMutex   sync.RWMutex
 )
 
 func main() {
-	// Load .env file
+	// 加载 .env 文件
 	if err := godotenv.Load(); err != nil {
-		// 此时日志系统还没初始化，使用标准日志
 		println("No .env file found, using system environment variables")
 	}
 
-	// 在加载环境变量后初始化日志系统
+	// 初始化日志系统（必须最先调用）
 	InitializeLogger()
-	Info("Logger initialized with environment configuration")
+	Info("Logger initialized")
 
-	// Initialize storage and load statistics
+	// 初始化存储并加载统计数据
 	if err := initStorage(); err != nil {
 		Fatal("Failed to initialize storage: %v", err)
 	}
 	loadStats()
 
-	// Initialize optimized HTTP client with connection pooling
-	transport := &http.Transport{
-		MaxIdleConns:          500,               // 增加连接池大小到500
-		MaxIdleConnsPerHost:   100,               // 增加每个主机的连接数到100
-		MaxConnsPerHost:       200,               // 限制每个主机的最大连接数到200
-		IdleConnTimeout:       600 * time.Second, // 延长空闲连接超时到10分钟
-		TLSHandshakeTimeout:   30 * time.Second,  // 增加TLS握手超时
-		ExpectContinueTimeout: 5 * time.Second,   // 增加Expect Continue超时
-		DisableKeepAlives:     false,             // 启用 Keep-Alive
-		ForceAttemptHTTP2:     true,              // 强制使用 HTTP/2
-		// 连接池优化配置
-		ResponseHeaderTimeout: 30 * time.Second,
-		// 启用连接复用优化
-		DisableCompression: false,
-		// 优化TCP配置
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 600 * time.Second,
-		}).DialContext,
-	}
-	httpClient = &http.Client{
-		Transport: transport,
-		Timeout:   DefaultRequestTimeout, // 使用5分钟超时
-	}
-
-	// Load configuration
-	modelsData = loadModels()
-	data, err := os.ReadFile("models.json")
-	if err == nil {
-		sonic.Unmarshal(data, &modelsConfig)
-	}
-	loadClientAPIKeys()
-	loadJetbrainsAccounts()
-	// 初始化账户池
-	initAccountPool()
-
-	// Initialize request-triggered statistics saving
+	// 初始化请求触发的统计保存
 	initRequestTriggeredSaving()
 
-	// Set up graceful shutdown
-	setupGracefulShutdown()
+	// 从环境变量加载服务器配置
+	config, err := loadServerConfigFromEnv()
+	if err != nil {
+		Fatal("Failed to load server configuration: %v", err)
+	}
 
-	r := setupRoutes()
+	// 创建服务器实例
+	server, err := NewServer(config)
+	if err != nil {
+		Fatal("Failed to create server: %v", err)
+	}
 
-	Info("Starting JetBrains AI OpenAI Compatible API server...")
-	port := getEnvWithDefault("PORT", "7860")
-
-	if err := r.Run(":" + port); err != nil {
-		Fatal("Failed to start server: %v", err)
+	// 运行服务器（包含优雅关闭）
+	Info("Starting server on port %s", config.Port)
+	if err := server.Run(); err != nil {
+		Fatal("Server error: %v", err)
 	}
 }
 
-func setupGracefulShutdown() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		Info("Shutdown signal received, saving statistics before exiting...")
-		saveStats()
-		CloseLogger()
-		os.Exit(0)
-	}()
-}
+// loadServerConfigFromEnv 从环境变量加载服务器配置
+func loadServerConfigFromEnv() (ServerConfig, error) {
+	// 加载客户端 API keys
+	clientAPIKeys := parseEnvList(os.Getenv("CLIENT_API_KEYS"))
+	if len(clientAPIKeys) == 0 {
+		Warn("CLIENT_API_KEYS environment variable is empty")
+	} else {
+		Info("Loaded %d client API keys", len(clientAPIKeys))
+	}
 
-func initAccountPool() {
+	// 加载 JetBrains 账户
+	jetbrainsAccounts := loadJetbrainsAccountsFromEnv()
 	if len(jetbrainsAccounts) == 0 {
-		Warn("No JetBrains accounts loaded, account pool is empty.")
-		return
+		Warn("No JetBrains accounts configured")
+	} else {
+		Info("Loaded %d JetBrains accounts", len(jetbrainsAccounts))
 	}
-	accountPool = make(chan *JetbrainsAccount, len(jetbrainsAccounts))
-	for i := range jetbrainsAccounts {
-		accountPool <- &jetbrainsAccounts[i]
+
+	// 获取端口和 Gin 模式
+	port := getEnvWithDefault("PORT", "7860")
+	ginMode := getEnvWithDefault("GIN_MODE", "release")
+
+	config := ServerConfig{
+		Port:               port,
+		GinMode:            ginMode,
+		ClientAPIKeys:      clientAPIKeys,
+		JetbrainsAccounts:  jetbrainsAccounts,
+		ModelsConfigPath:   "models.json",
+		HTTPClientSettings: DefaultHTTPClientSettings(),
 	}
-	Info("Account pool initialized with %d accounts", len(jetbrainsAccounts))
+
+	return config, nil
+}
+
+// loadJetbrainsAccountsFromEnv 从环境变量加载 JetBrains 账户
+func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
+	licenseIDs := parseEnvList(os.Getenv("JETBRAINS_LICENSE_IDS"))
+	authorizations := parseEnvList(os.Getenv("JETBRAINS_AUTHORIZATIONS"))
+
+	maxLen := len(licenseIDs)
+	if len(authorizations) > maxLen {
+		maxLen = len(authorizations)
+	}
+
+	// 填充到相同长度
+	for len(licenseIDs) < maxLen {
+		licenseIDs = append(licenseIDs, "")
+	}
+	for len(authorizations) < maxLen {
+		authorizations = append(authorizations, "")
+	}
+
+	var accounts []JetbrainsAccount
+	for i := 0; i < maxLen; i++ {
+		if licenseIDs[i] != "" && authorizations[i] != "" {
+			account := JetbrainsAccount{
+				LicenseID:      licenseIDs[i],
+				Authorization:  authorizations[i],
+				JWT:            "",
+				LastUpdated:    0,
+				HasQuota:       true,
+				LastQuotaCheck: 0,
+			}
+			accounts = append(accounts, account)
+		}
+	}
+
+	return accounts
 }

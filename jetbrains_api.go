@@ -13,7 +13,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtRefreshMutex sync.Mutex
+var (
+	jwtRefreshMutex sync.Mutex
+	quotaCacheMutex sync.RWMutex
+)
 
 // setJetbrainsHeaders sets the required headers for JetBrains API requests
 func setJetbrainsHeaders(req *http.Request, jwt string) {
@@ -26,7 +29,7 @@ func setJetbrainsHeaders(req *http.Request, jwt string) {
 }
 
 // handleJWTExpiredAndRetry handles JWT expiration and retries the request
-func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount) (*http.Response, error) {
+func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, httpClient *http.Client) (*http.Response, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -39,7 +42,7 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount) (*ht
 		jwtRefreshMutex.Lock()
 		// Check if another goroutine already refreshed the JWT
 		if req.Header.Get("grazie-authenticate-jwt") == account.JWT {
-			if err := refreshJetbrainsJWT(account); err != nil {
+			if err := refreshJetbrainsJWT(account, httpClient); err != nil {
 				jwtRefreshMutex.Unlock()
 				return nil, err
 			}
@@ -54,22 +57,31 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount) (*ht
 }
 
 // ensureValidJWT ensures that the account has a valid JWT
-func ensureValidJWT(account *JetbrainsAccount) error {
+func ensureValidJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	if account.JWT == "" && account.LicenseID != "" {
 		jwtRefreshMutex.Lock()
 		defer jwtRefreshMutex.Unlock()
 
 		// Double-check after acquiring lock
 		if account.JWT == "" {
-			return refreshJetbrainsJWT(account)
+			return refreshJetbrainsJWT(account, httpClient)
 		}
 	}
 	return nil
 }
 
 // checkQuota checks the quota for a given JetBrains account
-func checkQuota(account *JetbrainsAccount) error {
-	quotaData, err := getQuotaData(account)
+func checkQuota(account *JetbrainsAccount, httpClient *http.Client) error {
+	// 如果最近检查过配额（1小时内），跳过检查
+	if account.LastQuotaCheck > 0 {
+		lastCheck := time.Unix(int64(account.LastQuotaCheck), 0)
+		if time.Since(lastCheck) < time.Duration(QuotaCacheTime)*time.Second {
+			// 配额检查仍然有效，跳过
+			return nil
+		}
+	}
+
+	quotaData, err := getQuotaData(account, httpClient)
 	if err != nil {
 		account.HasQuota = false
 		return err
@@ -80,7 +92,7 @@ func checkQuota(account *JetbrainsAccount) error {
 }
 
 // refreshJetbrainsJWT refreshes the JWT for a given JetBrains account
-func refreshJetbrainsJWT(account *JetbrainsAccount) error {
+func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	Info("Refreshing JWT for licenseId %s...", account.LicenseID)
 
 	payload := map[string]string{"licenseId": account.LicenseID}
@@ -130,55 +142,8 @@ func refreshJetbrainsJWT(account *JetbrainsAccount) error {
 	return fmt.Errorf("JWT refresh failed: invalid response state %s", state)
 }
 
-// getNextJetbrainsAccount gets the next available JetBrains account from the pool
-func getNextJetbrainsAccount() (*JetbrainsAccount, error) {
-	if len(jetbrainsAccounts) == 0 {
-		return nil, fmt.Errorf("service unavailable: no JetBrains accounts configured")
-	}
-
-	accountWaitStart := time.Now()
-	select {
-	case account := <-accountPool:
-		// 记录账户池等待时间
-		waitDuration := time.Since(accountWaitStart)
-		if waitDuration > 100*time.Millisecond { // 只记录超过100ms的等待
-			RecordAccountPoolWait(waitDuration)
-		}
-
-		// Defer re-queueing the account
-		defer func() {
-			accountPool <- account
-		}()
-
-		// 检查JWT是否需要刷新
-		if account.LicenseID != "" {
-			if account.JWT == "" || time.Now().After(account.ExpiryTime.Add(-JWTRefreshTime)) {
-				if err := refreshJetbrainsJWT(account); err != nil {
-					Error("Failed to refresh JWT for %s: %v", getTokenDisplayName(account), err)
-					RecordAccountPoolError()
-					return nil, err // Return error to retry with another account
-				}
-			}
-		}
-
-		// 检查配额
-		if err := checkQuota(account); err != nil {
-			Error("Failed to check quota for %s: %v", getTokenDisplayName(account), err)
-			RecordAccountPoolError()
-			return nil, err // Return error to retry
-		}
-
-		if account.HasQuota {
-			return account, nil
-		}
-
-		return nil, fmt.Errorf("account %s is over quota", getTokenDisplayName(account))
-
-	case <-time.After(60 * time.Second): // 增加到60秒，给账户更多时间释放
-		RecordAccountPoolError()
-		return nil, fmt.Errorf("timed out waiting for an available JetBrains account")
-	}
-}
+// getNextJetbrainsAccount 已废弃 - 使用 AccountManager.AcquireAccount 替代
+// 保留此函数签名以维持向后兼容性，但不应再使用
 
 // processQuotaData processes quota data and updates account status
 func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccount) {
@@ -197,8 +162,8 @@ func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccou
 	account.LastQuotaCheck = float64(time.Now().Unix())
 }
 
-func getQuotaData(account *JetbrainsAccount) (*JetbrainsQuotaResponse, error) {
-	if err := ensureValidJWT(account); err != nil {
+func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*JetbrainsQuotaResponse, error) {
+	if err := ensureValidJWT(account, httpClient); err != nil {
 		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
 	}
 
@@ -206,9 +171,17 @@ func getQuotaData(account *JetbrainsAccount) (*JetbrainsQuotaResponse, error) {
 		return nil, fmt.Errorf("account has no JWT")
 	}
 
-	// 检查缓存
+	// 修复: 使用 licenseID 作为缓存键而非 JWT，避免敏感信息泄露
 	quotaCacheMutex.RLock()
-	cacheKey := account.JWT
+	cacheKey := account.LicenseID
+	if cacheKey == "" {
+		// 如果没有 licenseID，使用 JWT 的前8个字符作为标识（仅用于缓存键）
+		if len(account.JWT) > 8 {
+			cacheKey = account.JWT[:8]
+		} else {
+			cacheKey = account.JWT
+		}
+	}
 	if cachedInfo, found := accountQuotaCache[cacheKey]; found && time.Since(cachedInfo.LastAccess) < QuotaCacheTime {
 		quotaCacheMutex.RUnlock()
 		return cachedInfo.QuotaData, nil
@@ -223,7 +196,7 @@ func getQuotaData(account *JetbrainsAccount) (*JetbrainsQuotaResponse, error) {
 	req.Header.Set("Content-Length", "0")
 	setJetbrainsHeaders(req, account.JWT)
 
-	resp, err := handleJWTExpiredAndRetry(req, account)
+	resp, err := handleJWTExpiredAndRetry(req, account, httpClient)
 	if err != nil {
 		return nil, err
 	}

@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// anthropicMessages 处理 Anthropic Messages API 请求
+// anthropicMessages 处理 Anthropic Messages API 请求（Server 方法）
 // SRP: 专门处理 Anthropic 协议的单一职责
-func anthropicMessages(c *gin.Context) {
+func (s *Server) anthropicMessages(c *gin.Context) {
 	startTime := time.Now()
 
 	// 记录性能指标开始
@@ -60,7 +60,7 @@ func anthropicMessages(c *gin.Context) {
 	}
 
 	// 检查模型是否存在
-	modelConfig := getModelItem(anthReq.Model)
+	modelConfig := getModelItem(s.modelsData, anthReq.Model)
 	if modelConfig == nil {
 		recordFailureWithTimer(startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusNotFound, "model_not_found_error",
@@ -68,23 +68,14 @@ func anthropicMessages(c *gin.Context) {
 		return
 	}
 
-	// 获取账户 (DRY: 复用现有账户管理逻辑)
-	account, err := getNextJetbrainsAccount()
+	// 使用 AccountManager 获取账户
+	account, err := s.accountManager.AcquireAccount(c.Request.Context())
 	if err != nil {
 		recordFailureWithTimer(startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusTooManyRequests, "rate_limit_error", err.Error())
 		return
 	}
-	defer func() {
-		// Return the account to the pool when the function exits
-		select {
-		case accountPool <- account:
-			// Returned successfully
-		default:
-			// Pool is full, which shouldn't happen if managed correctly.
-			Warn("account pool is full. Could not return account.")
-		}
-	}()
+	defer s.accountManager.ReleaseAccount(account)
 
 	accountIdentifier := getTokenDisplayName(account)
 
@@ -118,7 +109,7 @@ func anthropicMessages(c *gin.Context) {
 	}
 
 	// 直接调用 JetBrains API
-	jetbrainsResponse, statusCode, err := callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
+	jetbrainsResponse, statusCode, err := s.callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
 	if err != nil {
 		recordFailureWithTimer(startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, statusCode, "api_error", err.Error())
@@ -148,8 +139,8 @@ func respondWithAnthropicError(c *gin.Context, statusCode int, errorType, messag
 	c.JSON(statusCode, errorResp)
 }
 
-// callJetbrainsAPI 调用 JetBrains API (DRY: 提取公共逻辑)
-func callJetbrainsAPI(openAIReq *ChatCompletionRequest, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
+// callJetbrainsAPI 调用 JetBrains API（Server 方法）
+func (s *Server) callJetbrainsAPI(openAIReq *ChatCompletionRequest, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
 	// 这里复用现有的 chatCompletions 中的 JetBrains API 调用逻辑
 	// 为了保持 DRY 原则，我们需要重构现有代码以提取公共部分
 
@@ -237,7 +228,7 @@ func callJetbrainsAPI(openAIReq *ChatCompletionRequest, account *JetbrainsAccoun
 		data = []JetbrainsData{}
 	}
 
-	internalModel := getInternalModelName(openAIReq.Model)
+	internalModel := getInternalModelName(s.modelsConfig, openAIReq.Model)
 	payload := JetbrainsPayload{
 		Prompt:  "ij.chat.request.new-chat-on-start",
 		Profile: internalModel,
@@ -265,7 +256,7 @@ func callJetbrainsAPI(openAIReq *ChatCompletionRequest, account *JetbrainsAccoun
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create request")
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to make request")
 	}

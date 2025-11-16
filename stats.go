@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"net/http"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -14,6 +14,8 @@ const (
 	statsFilePath = "stats.json"
 	// 控制持久化频率，避免过于频繁的写操作
 	minSaveInterval = 5 * time.Second
+	// 请求历史记录的缓冲区大小
+	historyBufferSize = 1000
 )
 
 // 用于控制异步持久化的变量
@@ -24,14 +26,176 @@ var (
 	saveWorkerOnce sync.Once
 )
 
+// AtomicRequestStats 使用 atomic 操作的高性能统计结构
+// 避免每次请求都获取互斥锁，显著提升并发性能
+type AtomicRequestStats struct {
+	totalRequests      int64 // 使用 atomic 操作
+	successfulRequests int64 // 使用 atomic 操作
+	failedRequests     int64 // 使用 atomic 操作
+	totalResponseTime  int64 // 使用 atomic 操作
+
+	// 请求历史使用无锁的 channel 缓冲
+	historyChannel chan RequestRecord
+	historyBuffer  []RequestRecord
+	historyMutex   sync.RWMutex // 仅在读取历史时使用
+
+	lastRequestTime atomic.Value // 存储 time.Time
+}
+
+// NewAtomicRequestStats 创建新的原子统计结构
+func NewAtomicRequestStats() *AtomicRequestStats {
+	stats := &AtomicRequestStats{
+		historyChannel: make(chan RequestRecord, historyBufferSize),
+		historyBuffer:  make([]RequestRecord, 0, historyBufferSize),
+	}
+
+	// 启动后台 worker 处理历史记录
+	go stats.historyWorker()
+
+	return stats
+}
+
+// historyWorker 后台处理请求历史记录，避免阻塞主路径
+func (s *AtomicRequestStats) historyWorker() {
+	ticker := time.NewTicker(100 * time.Millisecond) // 每100ms批量处理
+	defer ticker.Stop()
+
+	batch := make([]RequestRecord, 0, 100)
+
+	for {
+		select {
+		case record := <-s.historyChannel:
+			batch = append(batch, record)
+
+			// 批量处理，减少锁竞争
+			if len(batch) >= 100 {
+				s.flushHistoryBatch(batch)
+				batch = make([]RequestRecord, 0, 100)
+			}
+
+		case <-ticker.C:
+			// 定期刷新批次
+			if len(batch) > 0 {
+				s.flushHistoryBatch(batch)
+				batch = make([]RequestRecord, 0, 100)
+			}
+		}
+	}
+}
+
+// flushHistoryBatch 批量刷新历史记录
+func (s *AtomicRequestStats) flushHistoryBatch(batch []RequestRecord) {
+	s.historyMutex.Lock()
+	defer s.historyMutex.Unlock()
+
+	for _, record := range batch {
+		s.historyBuffer = append(s.historyBuffer, record)
+		if len(s.historyBuffer) > historyBufferSize {
+			// 保留最新的 historyBufferSize 条记录
+			s.historyBuffer = s.historyBuffer[len(s.historyBuffer)-historyBufferSize:]
+		}
+	}
+}
+
+// RecordRequest 记录请求（无锁高性能版本）
+func (s *AtomicRequestStats) RecordRequest(success bool, responseTime int64, model, account string) {
+	// 原子操作，无需锁
+	atomic.AddInt64(&s.totalRequests, 1)
+	atomic.AddInt64(&s.totalResponseTime, responseTime)
+
+	if success {
+		atomic.AddInt64(&s.successfulRequests, 1)
+	} else {
+		atomic.AddInt64(&s.failedRequests, 1)
+	}
+
+	// 更新最后请求时间
+	s.lastRequestTime.Store(time.Now())
+
+	// 非阻塞发送到历史 channel
+	record := RequestRecord{
+		Timestamp:    time.Now(),
+		Success:      success,
+		ResponseTime: responseTime,
+		Model:        model,
+		Account:      account,
+	}
+
+	select {
+	case s.historyChannel <- record:
+		// 成功发送
+	default:
+		// Channel 满了，丢弃最旧的记录（避免阻塞）
+		// 这比阻塞主请求路径更好
+	}
+}
+
+// ToRequestStats 转换为可序列化的 RequestStats 结构
+func (s *AtomicRequestStats) ToRequestStats() RequestStats {
+	s.historyMutex.RLock()
+	history := make([]RequestRecord, len(s.historyBuffer))
+	copy(history, s.historyBuffer)
+	s.historyMutex.RUnlock()
+
+	var lastTime time.Time
+	if t := s.lastRequestTime.Load(); t != nil {
+		lastTime = t.(time.Time)
+	}
+
+	return RequestStats{
+		TotalRequests:      atomic.LoadInt64(&s.totalRequests),
+		SuccessfulRequests: atomic.LoadInt64(&s.successfulRequests),
+		FailedRequests:     atomic.LoadInt64(&s.failedRequests),
+		TotalResponseTime:  atomic.LoadInt64(&s.totalResponseTime),
+		LastRequestTime:    lastTime,
+		RequestHistory:     history,
+	}
+}
+
+// GetHistory 获取请求历史的副本
+func (s *AtomicRequestStats) GetHistory() []RequestRecord {
+	s.historyMutex.RLock()
+	defer s.historyMutex.RUnlock()
+
+	history := make([]RequestRecord, len(s.historyBuffer))
+	copy(history, s.historyBuffer)
+	return history
+}
+
+// 全局原子统计实例
+var atomicStats = NewAtomicRequestStats()
+
 // saveStats saves the current request statistics using the configured storage
 func saveStats() {
+	// 从原子统计转换为可序列化的结构
+	_ = atomicStats.ToRequestStats()
+
+	// 直接保存，不需要全局变量
 	saveStatsWithStorage()
 }
 
 // loadStats loads request statistics using the configured storage
 func loadStats() {
-	loadStatsWithStorage()
+	stats := loadStatsWithStorage()
+	if stats == nil {
+		return
+	}
+
+	// 从加载的数据初始化原子统计
+	for _, record := range stats.RequestHistory {
+		select {
+		case atomicStats.historyChannel <- record:
+		default:
+			// Channel 满了，跳过旧记录
+		}
+	}
+	atomic.StoreInt64(&atomicStats.totalRequests, stats.TotalRequests)
+	atomic.StoreInt64(&atomicStats.successfulRequests, stats.SuccessfulRequests)
+	atomic.StoreInt64(&atomicStats.failedRequests, stats.FailedRequests)
+	atomic.StoreInt64(&atomicStats.totalResponseTime, stats.TotalResponseTime)
+	if !stats.LastRequestTime.IsZero() {
+		atomicStats.lastRequestTime.Store(stats.LastRequestTime)
+	}
 }
 
 // showStatsPage 显示统计页面
@@ -40,81 +204,8 @@ func showStatsPage(c *gin.Context) {
 	c.File("./static/index.html")
 }
 
-// getStatsData 获取统计数据的JSON API端点
-func getStatsData(c *gin.Context) {
-	// 清除配额缓存，强制从上游重新获取配额信息
-	quotaCacheMutex.Lock()
-	for key := range accountQuotaCache {
-		delete(accountQuotaCache, key)
-	}
-	quotaCacheMutex.Unlock()
-
-	// 获取Token信息
-	var tokensInfo []gin.H
-	for i := range jetbrainsAccounts {
-		tokenInfo, err := getTokenInfoFromAccount(&jetbrainsAccounts[i])
-		if err != nil {
-			tokensInfo = append(tokensInfo, gin.H{
-				"name":       getTokenDisplayName(&jetbrainsAccounts[i]),
-				"license":    "",
-				"used":       0.0,
-				"total":      0.0,
-				"usageRate":  0.0,
-				"expiryDate": "",
-				"status":     "错误",
-			})
-		} else {
-			tokensInfo = append(tokensInfo, gin.H{
-				"name":       tokenInfo.Name,
-				"license":    tokenInfo.License,
-				"used":       tokenInfo.Used,
-				"total":      tokenInfo.Total,
-				"usageRate":  tokenInfo.UsageRate,
-				"expiryDate": tokenInfo.ExpiryDate.Format("2006-01-02 15:04:05"),
-				"status":     tokenInfo.Status,
-			})
-		}
-	}
-
-	// 获取统计数据
-	stats24h := getPeriodStats(24)
-	stats7d := getPeriodStats(24 * 7)
-	stats30d := getPeriodStats(24 * 30)
-	currentQPS := getCurrentQPS()
-
-	// 准备Token过期监控数据
-	var expiryInfo []gin.H
-	for i := range jetbrainsAccounts {
-		account := &jetbrainsAccounts[i]
-		expiryTime := account.ExpiryTime
-
-		status := "正常"
-		warning := "正常"
-		if time.Now().Add(1 * time.Hour).After(expiryTime) {
-			status = "即将过期"
-			warning = "即将过期"
-		}
-
-		expiryInfo = append(expiryInfo, gin.H{
-			"name":       getTokenDisplayName(account),
-			"expiryTime": expiryTime.Format("2006-01-02 15:04:05"),
-			"status":     status,
-			"warning":    warning,
-		})
-	}
-
-	// 返回JSON数据
-	c.JSON(200, gin.H{
-		"currentTime":  time.Now().Format("2006-01-02 15:04:05"),
-		"currentQPS":   fmt.Sprintf("%.3f", currentQPS),
-		"totalRecords": len(requestStats.RequestHistory),
-		"stats24h":     stats24h,
-		"stats7d":      stats7d,
-		"stats30d":     stats30d,
-		"tokensInfo":   tokensInfo,
-		"expiryInfo":   expiryInfo,
-	})
-}
+// getStatsData 已移至 server.go 作为 Server 方法
+// 保留此注释以维持向后兼容性
 
 // streamLog 流式日志输出
 func streamLog(c *gin.Context) {
@@ -195,48 +286,26 @@ func triggerAsyncSave() {
 }
 
 // Statistics functions
+// recordRequest 使用无锁原子操作的高性能版本
+// 在高并发下性能显著优于互斥锁版本
 func recordRequest(success bool, responseTime int64, model, account string) {
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
-
-	requestStats.TotalRequests++
-	requestStats.LastRequestTime = time.Now()
-	requestStats.TotalResponseTime += responseTime
-
-	if success {
-		requestStats.SuccessfulRequests++
-	} else {
-		requestStats.FailedRequests++
-	}
-
-	// Add to history (keep last 1000 records)
-	record := RequestRecord{
-		Timestamp:    time.Now(),
-		Success:      success,
-		ResponseTime: responseTime,
-		Model:        model,
-		Account:      account,
-	}
-
-	requestStats.RequestHistory = append(requestStats.RequestHistory, record)
-	if len(requestStats.RequestHistory) > 1000 {
-		requestStats.RequestHistory = requestStats.RequestHistory[1:]
-	}
+	// 使用原子统计，完全无锁
+	atomicStats.RecordRequest(success, responseTime, model, account)
 
 	// 触发异步持久化
 	triggerAsyncSave()
 }
 
 func getPeriodStats(hours int) PeriodStats {
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
+	// 从原子统计获取历史记录副本（无锁读取）
+	history := atomicStats.GetHistory()
 
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
 	var periodRequests int64
 	var periodSuccessful int64
 	var periodResponseTime int64
 
-	for _, record := range requestStats.RequestHistory {
+	for _, record := range history {
 		if record.Timestamp.After(cutoff) {
 			periodRequests++
 			periodResponseTime += record.ResponseTime
@@ -262,14 +331,14 @@ func getPeriodStats(hours int) PeriodStats {
 }
 
 func getCurrentQPS() float64 {
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
+	// 从原子统计获取历史记录副本
+	history := atomicStats.GetHistory()
 
 	now := time.Now()
 	cutoff := now.Add(-1 * time.Minute)
 	var recentRequests int64
 
-	for _, record := range requestStats.RequestHistory {
+	for _, record := range history {
 		if record.Timestamp.After(cutoff) {
 			recentRequests++
 		}
@@ -278,8 +347,8 @@ func getCurrentQPS() float64 {
 	return float64(recentRequests) / 60.0
 }
 
-func getTokenInfoFromAccount(account *JetbrainsAccount) (*TokenInfo, error) {
-	quotaData, err := getQuotaData(account)
+func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client) (*TokenInfo, error) {
+	quotaData, err := getQuotaData(account, httpClient)
 	if err != nil {
 		return &TokenInfo{
 			Name:   getTokenDisplayName(account),

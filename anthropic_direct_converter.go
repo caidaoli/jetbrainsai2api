@@ -115,10 +115,10 @@ func anthropicToJetbrainsTools(anthTools []AnthropicTool) []JetbrainsToolDefinit
 	return jetbrainsTools
 }
 
-// callJetbrainsAPIDirect 直接调用 JetBrains API
+// callJetbrainsAPIDirect 直接调用 JetBrains API（Server 方法）
 // KISS: 简化调用链，消除中间转换
-func callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbrainsMessages []JetbrainsMessage, data []JetbrainsData, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
-	internalModel := getInternalModelName(anthReq.Model)
+func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbrainsMessages []JetbrainsMessage, data []JetbrainsData, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
+	internalModel := getInternalModelName(s.modelsConfig, anthReq.Model)
 	payload := JetbrainsPayload{
 		Prompt:  "ij.chat.request.new-chat-on-start",
 		Profile: internalModel,
@@ -155,7 +155,7 @@ func callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbrainsMessages
 	req.Header.Set("Cache-Control", "no-cache")
 	setJetbrainsHeaders(req, account.JWT)
 
-	resp, err := httpClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to make request")
 	}
