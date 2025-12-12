@@ -26,19 +26,33 @@ type AtomicRequestStats struct {
 	historyMutex   sync.RWMutex // 仅在读取历史时使用
 
 	lastRequestTime atomic.Value // 存储 time.Time
+
+	// 优雅关闭支持
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewAtomicRequestStats 创建新的原子统计结构
 func NewAtomicRequestStats() *AtomicRequestStats {
+	ctx, cancel := context.WithCancel(context.Background())
 	stats := &AtomicRequestStats{
 		historyChannel: make(chan RequestRecord, HistoryBufferSize),
 		historyBuffer:  make([]RequestRecord, 0, HistoryBufferSize),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	// 启动后台 worker 处理历史记录
 	go stats.historyWorker()
 
 	return stats
+}
+
+// Stop 停止 historyWorker goroutine
+func (s *AtomicRequestStats) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 }
 
 // historyWorker 后台处理请求历史记录，避免阻塞主路径
@@ -50,6 +64,13 @@ func (s *AtomicRequestStats) historyWorker() {
 
 	for {
 		select {
+		case <-s.ctx.Done():
+			// 收到关闭信号，刷新剩余批次后退出
+			if len(batch) > 0 {
+				s.flushHistoryBatch(batch)
+			}
+			return
+
 		case record := <-s.historyChannel:
 			batch = append(batch, record)
 
@@ -618,6 +639,11 @@ func (ms *MetricsService) Close() error {
 	// 停止保存协程
 	if ms.cancel != nil {
 		ms.cancel()
+	}
+
+	// 停止 requestStats 的 historyWorker goroutine
+	if ms.requestStats != nil {
+		ms.requestStats.Stop()
 	}
 
 	// 等待所有 goroutine 完成
