@@ -74,9 +74,15 @@ func NewPooledAccountManager(config AccountManagerConfig) (*PooledAccountManager
 // 支持 context 取消和超时
 func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsAccount, error) {
 	accountWaitStart := time.Now()
+	triedAccounts := make(map[*JetbrainsAccount]bool)
+	totalAccounts := am.GetAccountCount()
 
-	// 最多重试3次，避免无限循环
-	const maxRetries = AccountAcquireMaxRetries
+	// 最大重试次数：确保至少尝试每个账户一次
+	maxRetries := AccountAcquireMaxRetries
+	if totalAccounts > maxRetries {
+		maxRetries = totalAccounts
+	}
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -84,21 +90,37 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 			return nil, fmt.Errorf("request cancelled while waiting for account: %w", ctx.Err())
 
 		case account := <-am.pool:
-			// 记录等待时间
-			if attempt == 0 {
+			// 检查是否已尝试过此账户
+			if triedAccounts[account] {
+				am.ReleaseAccount(account)
+				// 如果所有账户都已尝试过，提前退出
+				if len(triedAccounts) >= totalAccounts {
+					am.metrics.RecordAccountPoolError()
+					return nil, fmt.Errorf("all %d accounts have been tried and failed", totalAccounts)
+				}
+				// 不增加 attempt，继续尝试其他账户
+				attempt--
+				continue
+			}
+
+			// 记录等待时间（仅首次获取时）
+			if len(triedAccounts) == 0 {
 				waitDuration := time.Since(accountWaitStart)
 				if waitDuration > 100*time.Millisecond {
 					am.metrics.RecordAccountPoolWait(waitDuration)
 				}
 			}
 
+			// 标记此账户已尝试
+			triedAccounts[account] = true
+
 			// 检查并刷新 JWT（如果需要）
 			if account.LicenseID != "" {
 				if account.JWT == "" || time.Now().After(account.ExpiryTime.Add(-JWTRefreshTime)) {
 					if err := am.refreshJWTInternal(account); err != nil {
-						am.logger.Error("Failed to refresh JWT for %s (attempt %d/%d): %v", getTokenDisplayName(account), attempt+1, maxRetries, err)
+						am.logger.Error("Failed to refresh JWT for %s (tried %d/%d accounts): %v",
+							getTokenDisplayName(account), len(triedAccounts), totalAccounts, err)
 						am.metrics.RecordAccountPoolError()
-						// JWT刷新失败，放回池中，重试下一个账户
 						am.ReleaseAccount(account)
 						continue
 					}
@@ -107,16 +129,16 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 
 			// 检查配额
 			if err := am.checkQuotaInternal(account); err != nil {
-				am.logger.Error("Failed to check quota for %s (attempt %d/%d): %v", getTokenDisplayName(account), attempt+1, maxRetries, err)
+				am.logger.Error("Failed to check quota for %s (tried %d/%d accounts): %v",
+					getTokenDisplayName(account), len(triedAccounts), totalAccounts, err)
 				am.metrics.RecordAccountPoolError()
-				// 配额检查失败，放回池中，重试下一个账户
 				am.ReleaseAccount(account)
 				continue
 			}
 
 			if !account.HasQuota {
-				am.logger.Warn("Account %s is over quota (attempt %d/%d)", getTokenDisplayName(account), attempt+1, maxRetries)
-				// 配额不足，放回池中，重试下一个账户
+				am.logger.Warn("Account %s is over quota (tried %d/%d accounts)",
+					getTokenDisplayName(account), len(triedAccounts), totalAccounts)
 				am.ReleaseAccount(account)
 				continue
 			}
@@ -132,7 +154,7 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 
 	// 所有重试都失败
 	am.metrics.RecordAccountPoolError()
-	return nil, fmt.Errorf("failed to acquire account after %d attempts: all accounts unavailable", maxRetries)
+	return nil, fmt.Errorf("failed to acquire account after trying %d accounts: all accounts unavailable", len(triedAccounts))
 }
 
 // ReleaseAccount 释放账户回池
@@ -198,32 +220,11 @@ func (am *PooledAccountManager) checkQuotaInternal(account *JetbrainsAccount) er
 		}
 	}
 
-	// 使用注入的 cache，如果没有则使用直接调用
-	var quotaData *JetbrainsQuotaResponse
-	var err error
-
-	if am.cache != nil {
-		// 使用 CacheService 获取配额数据（已修复 TOCTOU）
-		cacheKey := generateQuotaCacheKey(account)
-		cached, found := am.cache.GetQuotaCache(cacheKey)
-		if found {
-			quotaData = cached
-		} else {
-			quotaData, err = getQuotaDataDirect(account, am.httpClient)
-			if err != nil {
-				account.HasQuota = false
-				return err
-			}
-			// 缓存结果
-			am.cache.SetQuotaCache(cacheKey, quotaData, QuotaCacheTime)
-		}
-	} else {
-		// 回退到直接调用（向后兼容）
-		quotaData, err = getQuotaData(account, am.httpClient)
-		if err != nil {
-			account.HasQuota = false
-			return err
-		}
+	// 使用注入的 cache 获取配额数据
+	quotaData, err := getQuotaData(account, am.httpClient, am.cache)
+	if err != nil {
+		account.HasQuota = false
+		return err
 	}
 
 	processQuotaData(quotaData, account)

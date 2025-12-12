@@ -189,26 +189,3 @@ func initStorageGlobal() error {
 	storage, err = initStorage()
 	return err
 }
-
-// saveStatsWithStorage saves stats using the configured storage
-func saveStatsWithStorage() {
-	stats := atomicStats.ToRequestStats()
-	if err := storage.SaveStats(&stats); err != nil {
-		Error("Error saving stats: %v", err)
-	}
-}
-
-// loadStatsWithStorage loads stats using the configured storage
-func loadStatsWithStorage() *RequestStats {
-	stats, err := storage.LoadStats()
-	if err != nil {
-		Error("Error loading stats: %v", err)
-		// Return empty stats if loading fails
-		return &RequestStats{
-			RequestHistory: []RequestRecord{},
-		}
-	}
-
-	Info("Successfully loaded %d request records", len(stats.RequestHistory))
-	return stats
-}

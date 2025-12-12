@@ -530,18 +530,3 @@ func marshalJSON(v any) ([]byte, error) {
 }
 
 // ============================================================================
-// 全局变量（向后兼容 - 已废弃）
-// ============================================================================
-
-// globalCacheService 全局 CacheService 实例
-//
-// Deprecated: 此全局变量仅用于向后兼容旧代码。
-// 新代码应该通过 Server 或 AccountManager 的依赖注入获取 CacheService。
-//
-// 迁移指南：
-// - 在 handlers 中使用 s.cache (Server.cache)
-// - 在 AccountManager 中使用 am.cache
-// - 在新模块中通过构造函数注入 Cache 接口
-//
-// 计划在下一个主版本中移除此全局变量。
-var globalCacheService = NewCacheService()

@@ -150,8 +150,8 @@ func getLicenseDisplayName(account *JetbrainsAccount) string {
 }
 
 // getTokenInfoFromAccount 获取账户的Token信息（用于统计页面）
-func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client) (*TokenInfo, error) {
-	quotaData, err := getQuotaData(account, httpClient)
+func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*TokenInfo, error) {
+	quotaData, err := getQuotaData(account, httpClient, cache)
 	if err != nil {
 		return &TokenInfo{
 			Name:   getTokenDisplayName(account),

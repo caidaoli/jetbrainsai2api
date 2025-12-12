@@ -35,62 +35,6 @@ var (
 // 公共 API
 // ============================================================================
 
-// ValidateAndTransformTools 验证并转换工具定义以符合 JetBrains API 要求
-// 接收缓存参数，移除对全局变量的依赖
-func ValidateAndTransformTools(tools []Tool, cache Cache) ([]Tool, error) {
-	if len(tools) == 0 {
-		return tools, nil
-	}
-
-	// 检查缓存
-	cacheKey := generateToolsCacheKey(tools)
-	if cached, found := cache.Get(cacheKey); found {
-		RecordCacheHit()
-		// 安全的类型断言，防止缓存污染导致panic
-		if validatedTools, ok := cached.([]Tool); ok {
-			return validatedTools, nil
-		}
-		// 缓存格式错误，重新验证
-		RecordCacheMiss()
-	} else {
-		RecordCacheMiss()
-	}
-
-	validatedTools := make([]Tool, 0, len(tools))
-
-	for _, tool := range tools {
-		// 验证工具名称
-		if !isValidParamName(tool.Function.Name) {
-			Debug("Invalid tool name: %s, skipping tool", tool.Function.Name)
-			continue
-		}
-
-		// 转换参数 Schema
-		transformedParams, err := transformParameters(tool.Function.Parameters)
-		if err != nil {
-			Debug("Failed to transform tool %s parameters: %v", tool.Function.Name, err)
-			continue
-		}
-
-		// 创建验证后的工具
-		validatedTool := Tool{
-			Type: tool.Type,
-			Function: ToolFunction{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-				Parameters:  transformedParams,
-			},
-		}
-
-		validatedTools = append(validatedTools, validatedTool)
-	}
-
-	// 缓存验证结果（30分钟 TTL）
-	cache.Set(cacheKey, validatedTools, ToolsValidationCacheTTL)
-
-	return validatedTools, nil
-}
-
 // ValidateAndTransformToolsWithMetrics 验证并转换工具定义（带指标收集）
 // 这是推荐的新版本，完全消除对全局变量的依赖
 func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics MetricsCollector) ([]Tool, error) {
@@ -101,15 +45,17 @@ func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics Met
 	// 检查缓存
 	cacheKey := generateToolsCacheKey(tools)
 	if cached, found := cache.Get(cacheKey); found {
-		metrics.RecordCacheHit()
+		// 安全的类型断言，防止缓存污染导致panic
 		if validatedTools, ok := cached.([]Tool); ok {
+			metrics.RecordCacheHit()
 			return validatedTools, nil
 		}
-		// 缓存格式错误，重新验证
-		metrics.RecordCacheMiss()
-	} else {
-		metrics.RecordCacheMiss()
+		// 缓存格式错误，视为缓存失效
+		Warn("Cache format mismatch for tools validation (key: %s), revalidating", cacheKey[:16])
 	}
+
+	// 缓存未命中或格式错误
+	metrics.RecordCacheMiss()
 
 	validatedTools := make([]Tool, 0, len(tools))
 
@@ -468,14 +414,6 @@ func transformParamName(name string) string {
 	}
 
 	return result
-}
-
-// ==================== 向后兼容包装函数 ====================
-
-// validateAndTransformTools 向后兼容的包装函数
-// 使用 globalCacheService
-func validateAndTransformTools(tools []Tool) ([]Tool, error) {
-	return ValidateAndTransformTools(tools, globalCacheService)
 }
 
 // validateToolCallResponse 验证工具调用响应的完整性

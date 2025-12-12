@@ -41,20 +41,19 @@ func (p *RequestProcessor) ProcessMessages(messages []ChatMessage) ProcessMessag
 
 	// 尝试从缓存获取（使用注入的 cache 而非全局变量）
 	if cachedAny, found := p.cache.Get(cacheKey); found {
-		p.metrics.RecordCacheHit()
 		// 安全的类型断言，防止缓存污染导致panic
 		if jetbrainsMessages, ok := cachedAny.([]JetbrainsMessage); ok {
+			p.metrics.RecordCacheHit()
 			return ProcessMessagesResult{
 				JetbrainsMessages: jetbrainsMessages,
 				CacheHit:          true,
 			}
 		}
-		// 缓存格式错误，记录警告并重新生成
+		// 缓存格式错误，视为缓存失效，记录警告并重新生成
 		Warn("Cache format mismatch for messages (key: %s), regenerating", cacheKey[:16])
-		p.metrics.RecordCacheMiss()
 	}
 
-	// 缓存未命中，执行转换
+	// 缓存未命中或格式错误，执行转换
 	p.metrics.RecordCacheMiss()
 	jetbrainsMessages := openAIToJetbrainsMessages(messages)
 
@@ -93,21 +92,20 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 	// 尝试从缓存获取验证结果（使用注入的 cache 而非全局变量）
 	toolsCacheKey := generateToolsCacheKey(request.Tools)
 	if cachedAny, found := p.cache.Get(toolsCacheKey); found {
-		p.metrics.RecordCacheHit()
 		// 安全的类型断言，防止缓存污染导致panic
 		if validatedTools, ok := cachedAny.([]Tool); ok {
+			p.metrics.RecordCacheHit()
 			data := p.buildToolsData(validatedTools)
 			return ProcessToolsResult{
 				Data:          data,
 				ValidatedDone: true,
 			}
 		}
-		// 缓存格式错误，记录警告并重新验证
+		// 缓存格式错误，视为缓存失效，记录警告并重新验证
 		Warn("Cache format mismatch for tools (key: %s), revalidating", toolsCacheKey[:16])
-		p.metrics.RecordCacheMiss()
 	}
 
-	// 缓存未命中，执行验证
+	// 缓存未命中或格式错误，执行验证
 	p.metrics.RecordCacheMiss()
 	validationStart := time.Now()
 	validatedTools, err := ValidateAndTransformToolsWithMetrics(request.Tools, p.cache, p.metrics)

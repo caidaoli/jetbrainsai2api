@@ -72,27 +72,6 @@ func ensureValidJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	return nil
 }
 
-// checkQuota checks the quota for a given JetBrains account
-func checkQuota(account *JetbrainsAccount, httpClient *http.Client) error {
-	// 如果最近检查过配额（1小时内），跳过检查
-	if account.LastQuotaCheck > 0 {
-		lastCheck := time.Unix(int64(account.LastQuotaCheck), 0)
-		if time.Since(lastCheck) < QuotaCacheTime {
-			// 配额检查仍然有效，跳过
-			return nil
-		}
-	}
-
-	quotaData, err := getQuotaData(account, httpClient)
-	if err != nil {
-		account.HasQuota = false
-		return err
-	}
-
-	processQuotaData(quotaData, account)
-	return nil
-}
-
 // refreshJetbrainsJWT refreshes the JWT for a given JetBrains account
 func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	Info("Refreshing JWT for licenseId %s...", account.LicenseID)
@@ -169,7 +148,7 @@ func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccou
 }
 
 // getQuotaData 获取配额数据（使用 CacheService）
-func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*JetbrainsQuotaResponse, error) {
+func getQuotaData(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*JetbrainsQuotaResponse, error) {
 	if err := ensureValidJWT(account, httpClient); err != nil {
 		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
 	}
@@ -182,24 +161,28 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*Jetbrain
 	cacheKey := generateQuotaCacheKey(account)
 
 	// 从 CacheService 获取缓存（已内置深拷贝防止 TOCTOU）
-	if cachedData, found := globalCacheService.GetQuotaCache(cacheKey); found {
-		return cachedData, nil
+	if cache != nil {
+		if cachedData, found := cache.GetQuotaCache(cacheKey); found {
+			return cachedData, nil
+		}
 	}
 
 	// 调用直接获取函数
-	quotaData, err := getQuotaDataDirect(account, httpClient)
+	quotaData, err := getQuotaDataDirect(account, httpClient, cache)
 	if err != nil {
 		return nil, err
 	}
 
 	// 更新缓存（使用 CacheService）
-	globalCacheService.SetQuotaCache(cacheKey, quotaData, QuotaCacheTime)
+	if cache != nil {
+		cache.SetQuotaCache(cacheKey, quotaData, QuotaCacheTime)
+	}
 
 	return quotaData, nil
 }
 
 // getQuotaDataDirect 直接从 JetBrains API 获取配额数据（不使用全局缓存）
-func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client) (*JetbrainsQuotaResponse, error) {
+func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*JetbrainsQuotaResponse, error) {
 	if err := ensureValidJWT(account, httpClient); err != nil {
 		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
 	}
@@ -225,9 +208,9 @@ func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client) (*Je
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		// 如果是401，则JWT可能已失效，从缓存中删除
-		if resp.StatusCode == HTTPStatusUnauthorized {
+		if resp.StatusCode == HTTPStatusUnauthorized && cache != nil {
 			cacheKey := generateQuotaCacheKey(account)
-			globalCacheService.DeleteQuotaCache(cacheKey)
+			cache.DeleteQuotaCache(cacheKey)
 		}
 		return nil, fmt.Errorf("quota check failed with status %d: %s", resp.StatusCode, string(body))
 	}

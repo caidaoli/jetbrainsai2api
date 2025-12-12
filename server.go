@@ -259,7 +259,7 @@ func (s *Server) getStatsData(c *gin.Context) {
 	var tokensInfo []gin.H
 
 	for i := range accounts {
-		tokenInfo, err := getTokenInfoFromAccount(&accounts[i], s.httpClient)
+		tokenInfo, err := getTokenInfoFromAccount(&accounts[i], s.httpClient, s.cache)
 		if err != nil {
 			tokensInfo = append(tokensInfo, gin.H{
 				"name":       getTokenDisplayName(&accounts[i]),
