@@ -16,14 +16,10 @@ func main() {
 	InitializeLogger()
 	Info("Logger initialized")
 
-	// 初始化存储并加载统计数据
+	// 初始化存储（MetricsService 将在 NewServer 中使用它）
 	if err := initStorageGlobal(); err != nil {
 		Fatal("Failed to initialize storage: %v", err)
 	}
-	loadStats()
-
-	// 初始化请求触发的统计保存
-	initRequestTriggeredSaving()
 
 	// 从环境变量加载服务器配置
 	config, err := loadServerConfigFromEnv()
@@ -32,6 +28,7 @@ func main() {
 	}
 
 	// 创建服务器实例
+	// 注：MetricsService 初始化和统计数据加载现在在 NewServer 内部完成
 	server, err := NewServer(config)
 	if err != nil {
 		Fatal("Failed to create server: %v", err)

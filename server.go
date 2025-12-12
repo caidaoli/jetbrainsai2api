@@ -28,6 +28,9 @@ type Server struct {
 	// 缓存（使用 CacheService 消除全局变量）
 	cache *CacheService
 
+	// 指标服务（消除全局变量）
+	metricsService *MetricsService
+
 	// 认证和模型
 	validClientKeys map[string]bool
 	modelsData      ModelsData
@@ -53,13 +56,26 @@ func NewServer(config ServerConfig) (*Server, error) {
 	// 创建缓存服务（消除全局变量）
 	cacheService := NewCacheService()
 
+	// 创建指标服务（消除全局变量）
+	metricsService := NewMetricsService(MetricsConfig{
+		SaveInterval: MinSaveInterval,
+		HistorySize:  HistoryBufferSize,
+		Storage:      storage, // 使用已初始化的全局 storage（将在后续版本中重构）
+		Logger:       appLogger,
+	})
+
+	// 加载历史统计数据
+	if err := metricsService.LoadStats(); err != nil {
+		Warn("Failed to load historical stats: %v", err)
+	}
+
 	// 创建账户管理器（使用新的配置式构造函数）
 	accountManager, err := NewPooledAccountManager(AccountManagerConfig{
 		Accounts:   config.JetbrainsAccounts,
 		HTTPClient: httpClient,
 		Cache:      cacheService,
 		Logger:     appLogger,
-		Metrics:    nil, // 使用默认空实现
+		Metrics:    metricsService, // 注入 MetricsService
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account manager: %w", err)
@@ -92,10 +108,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 		accountManager:   accountManager,
 		httpClient:       httpClient,
 		cache:            cacheService,
+		metricsService:   metricsService,
 		validClientKeys:  validClientKeys,
 		modelsData:       modelsData,
 		modelsConfig:     modelsConfig,
-		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cacheService),
+		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cacheService, metricsService),
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,
 	}
@@ -195,16 +212,17 @@ func (s *Server) setupGracefulShutdown() {
 		// 取消 context
 		s.shutdownCancel()
 
-		// 保存统计数据
-		saveStats()
+		// 关闭指标服务（内部会保存统计数据）
+		if s.metricsService != nil {
+			if err := s.metricsService.Close(); err != nil {
+				Error("Failed to close metrics service: %v", err)
+			}
+		}
 
 		// 停止缓存服务
 		if s.cache != nil {
 			s.cache.Close()
 		}
-
-		// 停止性能监控（向后兼容）
-		StopMetricsMonitor()
 
 		// 关闭账户管理器
 		if err := s.accountManager.Close(); err != nil {
@@ -234,7 +252,7 @@ func (s *Server) healthCheck(c *gin.Context) {
 // getStatsData 获取统计数据
 func (s *Server) getStatsData(c *gin.Context) {
 	// 清除配额缓存（使用 CacheService）
-	globalCacheService.ClearQuotaCache()
+	s.cache.ClearQuotaCache()
 
 	// 获取所有账户信息
 	accounts := s.accountManager.GetAllAccounts()
@@ -265,11 +283,12 @@ func (s *Server) getStatsData(c *gin.Context) {
 		}
 	}
 
-	// 获取统计数据
-	stats24h := getPeriodStats(24)
-	stats7d := getPeriodStats(24 * 7)
-	stats30d := getPeriodStats(24 * 30)
-	currentQPS := getCurrentQPS()
+	// 从 MetricsService 获取统计数据
+	stats := s.metricsService.GetRequestStats()
+	stats24h := s.getPeriodStatsFromHistory(stats.RequestHistory, 24)
+	stats7d := s.getPeriodStatsFromHistory(stats.RequestHistory, 24*7)
+	stats30d := s.getPeriodStatsFromHistory(stats.RequestHistory, 24*30)
+	currentQPS := s.metricsService.GetQPS()
 
 	// Token 过期监控
 	var expiryInfo []gin.H
@@ -295,13 +314,44 @@ func (s *Server) getStatsData(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"currentTime":  time.Now().Format(TimeFormatDateTime),
 		"currentQPS":   fmt.Sprintf("%.3f", currentQPS),
-		"totalRecords": len(atomicStats.GetHistory()),
+		"totalRecords": len(stats.RequestHistory),
 		"stats24h":     stats24h,
 		"stats7d":      stats7d,
 		"stats30d":     stats30d,
 		"tokensInfo":   tokensInfo,
 		"expiryInfo":   expiryInfo,
 	})
+}
+
+// getPeriodStatsFromHistory 从历史记录计算周期统计
+func (s *Server) getPeriodStatsFromHistory(history []RequestRecord, hours int) PeriodStats {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
+	var periodRequests int64
+	var periodSuccessful int64
+	var periodResponseTime int64
+
+	for _, record := range history {
+		if record.Timestamp.After(cutoff) {
+			periodRequests++
+			periodResponseTime += record.ResponseTime
+			if record.Success {
+				periodSuccessful++
+			}
+		}
+	}
+
+	stats := PeriodStats{
+		Requests: periodRequests,
+	}
+
+	if periodRequests > 0 {
+		stats.SuccessRate = float64(periodSuccessful) / float64(periodRequests) * 100
+		stats.AvgResponseTime = periodResponseTime / periodRequests
+	}
+
+	stats.QPS = float64(periodRequests) / (float64(hours) * 3600.0)
+
+	return stats
 }
 
 // Close 关闭服务器

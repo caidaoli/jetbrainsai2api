@@ -64,8 +64,8 @@ func processJetbrainsStream(ctx context.Context, resp *http.Response, onEvent fu
 	return nil
 }
 
-// handleStreamingResponse handles streaming responses from the JetBrains API
-func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string) {
+// handleStreamingResponseWithMetrics handles streaming responses (with injected MetricsService)
+func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
 	setStreamingHeaders(c, APIFormatOpenAI)
 
 	streamID := ResponseIDPrefix + uuid.New().String()
@@ -217,11 +217,11 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 		}
 	}
 
-	recordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
+	metrics.RecordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
 }
 
-// handleNonStreamingResponse handles non-streaming responses from the JetBrains API
-func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string) {
+// handleNonStreamingResponseWithMetrics handles non-streaming responses (with injected MetricsService)
+func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
 	var contentBuilder strings.Builder
 	var toolCalls []ToolCall
 	var currentFuncName string
@@ -346,7 +346,7 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 		},
 	}
 
-	recordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
+	metrics.RecordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
 	c.JSON(http.StatusOK, response)
 }
 

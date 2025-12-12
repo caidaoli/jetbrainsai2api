@@ -57,35 +57,32 @@ func respondWithAnthropicError(c *gin.Context, statusCode int, errorType, messag
 	c.JSON(statusCode, errorResp)
 }
 
-// trackPerformance 记录性能指标
-// 使用 defer 模式自动记录 HTTP 请求耗时
+// trackPerformanceWithMetrics 记录性能指标（使用注入的 MetricsService）
 // 使用方式:
 //
-//	defer trackPerformance(time.Now())()
-func trackPerformance(startTime time.Time) func() {
+//	defer trackPerformanceWithMetrics(s.metricsService, time.Now())()
+func trackPerformanceWithMetrics(metrics *MetricsService, startTime time.Time) func() {
 	return func() {
 		duration := time.Since(startTime)
-		RecordHTTPRequest(duration)
+		metrics.RecordHTTPRequest(duration)
 	}
 }
 
-// recordRequestResult 统一记录请求结果（成功或失败）
-// KISS: 简化统计记录逻辑
-func recordRequestResult(success bool, startTime time.Time, model, account string) {
+// recordRequestResultWithMetrics 统一记录请求结果（使用注入的 MetricsService）
+func recordRequestResultWithMetrics(metrics *MetricsService, success bool, startTime time.Time, model, account string) {
 	if success {
-		recordSuccess(startTime, model, account)
+		recordSuccessWithMetrics(metrics, startTime, model, account)
 	} else {
-		recordFailureWithTimer(startTime, model, account)
-		RecordHTTPError()
+		recordFailureWithMetrics(metrics, startTime, model, account)
+		metrics.RecordHTTPError()
 	}
 }
 
-// getModelConfigOrError 获取模型配置,如果不存在返回错误
-// DRY: 消除重复的模型验证代码
-func getModelConfigOrError(c *gin.Context, modelsData ModelsData, modelName string, startTime time.Time, errorFormat string) *ModelInfo {
+// getModelConfigOrErrorWithMetrics 获取模型配置（使用注入的 MetricsService）
+func getModelConfigOrErrorWithMetrics(c *gin.Context, metrics *MetricsService, modelsData ModelsData, modelName string, startTime time.Time, errorFormat string) *ModelInfo {
 	modelConfig := getModelItem(modelsData, modelName)
 	if modelConfig == nil {
-		recordFailureWithTimer(startTime, modelName, "")
+		recordFailureWithMetrics(metrics, startTime, modelName, "")
 
 		// 根据错误格式返回不同的响应
 		if errorFormat == APIFormatAnthropic {
@@ -99,20 +96,15 @@ func getModelConfigOrError(c *gin.Context, modelsData ModelsData, modelName stri
 	return modelConfig
 }
 
-// withPanicRecovery 包装 handler 函数，提供统一的 panic 恢复机制
-// SRP: 单一职责 - 只负责错误恢复和资源清理
-// OCP: 开闭原则 - 可扩展的资源清理逻辑
-//
-// 使用方式:
-//
-//	defer withPanicRecovery(c, startTime, &account, &resp, APIFormatOpenAI)()
-func withPanicRecovery(
+// withPanicRecoveryWithMetrics 包装 handler 函数（使用注入的 MetricsService）
+func withPanicRecoveryWithMetrics(
 	c *gin.Context,
+	metrics *MetricsService,
 	startTime time.Time,
 	account **JetbrainsAccount,
 	resp **http.Response,
 	accountManager AccountManager,
-	errorFormat string, // "openai" 或 "anthropic"
+	errorFormat string,
 ) func() {
 	return func() {
 		if r := recover(); r != nil {
@@ -126,8 +118,8 @@ func withPanicRecovery(
 				accountManager.ReleaseAccount(*account)
 			}
 
-			recordFailureWithTimer(startTime, "", "")
-			RecordHTTPError()
+			recordFailureWithMetrics(metrics, startTime, "", "")
+			metrics.RecordHTTPError()
 
 			// 根据错误格式返回不同的响应
 			if errorFormat == APIFormatAnthropic {

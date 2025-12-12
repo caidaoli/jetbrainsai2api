@@ -13,15 +13,17 @@ import (
 type RequestProcessor struct {
 	modelsConfig ModelsConfig
 	httpClient   *http.Client
-	cache        Cache // 新增：注入缓存依赖
+	cache        Cache            // 注入缓存依赖
+	metrics      MetricsCollector // 注入指标收集器
 }
 
 // NewRequestProcessor 创建新的请求处理器
-func NewRequestProcessor(modelsConfig ModelsConfig, httpClient *http.Client, cache Cache) *RequestProcessor {
+func NewRequestProcessor(modelsConfig ModelsConfig, httpClient *http.Client, cache Cache, metrics MetricsCollector) *RequestProcessor {
 	return &RequestProcessor{
 		modelsConfig: modelsConfig,
 		httpClient:   httpClient,
 		cache:        cache,
+		metrics:      metrics,
 	}
 }
 
@@ -39,7 +41,7 @@ func (p *RequestProcessor) ProcessMessages(messages []ChatMessage) ProcessMessag
 
 	// 尝试从缓存获取（使用注入的 cache 而非全局变量）
 	if cachedAny, found := p.cache.Get(cacheKey); found {
-		RecordCacheHit()
+		p.metrics.RecordCacheHit()
 		// 安全的类型断言，防止缓存污染导致panic
 		if jetbrainsMessages, ok := cachedAny.([]JetbrainsMessage); ok {
 			return ProcessMessagesResult{
@@ -49,11 +51,11 @@ func (p *RequestProcessor) ProcessMessages(messages []ChatMessage) ProcessMessag
 		}
 		// 缓存格式错误，记录警告并重新生成
 		Warn("Cache format mismatch for messages (key: %s), regenerating", cacheKey[:16])
-		RecordCacheMiss()
+		p.metrics.RecordCacheMiss()
 	}
 
 	// 缓存未命中，执行转换
-	RecordCacheMiss()
+	p.metrics.RecordCacheMiss()
 	jetbrainsMessages := openAIToJetbrainsMessages(messages)
 
 	// 缓存结果
@@ -91,7 +93,7 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 	// 尝试从缓存获取验证结果（使用注入的 cache 而非全局变量）
 	toolsCacheKey := generateToolsCacheKey(request.Tools)
 	if cachedAny, found := p.cache.Get(toolsCacheKey); found {
-		RecordCacheHit()
+		p.metrics.RecordCacheHit()
 		// 安全的类型断言，防止缓存污染导致panic
 		if validatedTools, ok := cachedAny.([]Tool); ok {
 			data := p.buildToolsData(validatedTools)
@@ -102,15 +104,15 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 		}
 		// 缓存格式错误，记录警告并重新验证
 		Warn("Cache format mismatch for tools (key: %s), revalidating", toolsCacheKey[:16])
-		RecordCacheMiss()
+		p.metrics.RecordCacheMiss()
 	}
 
 	// 缓存未命中，执行验证
-	RecordCacheMiss()
+	p.metrics.RecordCacheMiss()
 	validationStart := time.Now()
-	validatedTools, err := validateAndTransformTools(request.Tools)
+	validatedTools, err := ValidateAndTransformToolsWithMetrics(request.Tools, p.cache, p.metrics)
 	validationDuration := time.Since(validationStart)
-	RecordToolValidation(validationDuration)
+	p.metrics.RecordToolValidation(validationDuration)
 
 	if err != nil {
 		return ProcessToolsResult{

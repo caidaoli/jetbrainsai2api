@@ -15,12 +15,12 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	// Panic 恢复机制和性能追踪
 	var account *JetbrainsAccount
 	var resp *http.Response
-	defer withPanicRecovery(c, startTime, &account, &resp, s.accountManager, APIFormatAnthropic)()
-	defer trackPerformance(startTime)()
+	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &account, &resp, s.accountManager, APIFormatAnthropic)()
+	defer trackPerformanceWithMetrics(s.metricsService, startTime)()
 
 	var anthReq AnthropicMessagesRequest
 	if err := c.ShouldBindJSON(&anthReq); err != nil {
-		recordRequestResult(false, startTime, "", "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, "", "")
 		respondWithAnthropicError(c, http.StatusBadRequest, AnthropicErrorInvalidRequest, err.Error())
 		return
 	}
@@ -38,25 +38,25 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 
 	// 验证必填字段 (KISS: 简单验证逻辑)
 	if anthReq.Model == "" {
-		recordRequestResult(false, startTime, anthReq.Model, "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusBadRequest, AnthropicErrorInvalidRequest, "model is required")
 		return
 	}
 
 	if anthReq.MaxTokens <= 0 {
-		recordRequestResult(false, startTime, anthReq.Model, "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusBadRequest, AnthropicErrorInvalidRequest, "max_tokens must be positive")
 		return
 	}
 
 	if len(anthReq.Messages) == 0 {
-		recordRequestResult(false, startTime, anthReq.Model, "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusBadRequest, AnthropicErrorInvalidRequest, "messages cannot be empty")
 		return
 	}
 
 	// 检查模型是否存在
-	modelConfig := getModelConfigOrError(c, s.modelsData, anthReq.Model, startTime, APIFormatAnthropic)
+	modelConfig := getModelConfigOrErrorWithMetrics(c, s.metricsService, s.modelsData, anthReq.Model, startTime, APIFormatAnthropic)
 	if modelConfig == nil {
 		return
 	}
@@ -65,7 +65,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	var err error
 	account, err = s.accountManager.AcquireAccount(c.Request.Context())
 	if err != nil {
-		recordRequestResult(false, startTime, anthReq.Model, "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusTooManyRequests, AnthropicErrorRateLimit, err.Error())
 		return
 	}
@@ -95,7 +95,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 
 		toolsJSON, marshalErr := marshalJSON(jetbrainsTools)
 		if marshalErr != nil {
-			recordRequestResult(false, startTime, anthReq.Model, accountIdentifier)
+			recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
 			respondWithAnthropicError(c, http.StatusInternalServerError, AnthropicErrorAPI, "Failed to marshal tools")
 			return
 		}
@@ -106,7 +106,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	var statusCode int
 	resp, statusCode, err = s.callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
 	if err != nil {
-		recordRequestResult(false, startTime, anthReq.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, statusCode, AnthropicErrorAPI, err.Error())
 		return
 	}
@@ -114,8 +114,8 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	// 根据是否流式处理响应
 	isStream := anthReq.Stream != nil && *anthReq.Stream
 	if isStream {
-		handleAnthropicStreamingResponse(c, resp, &anthReq, startTime, accountIdentifier)
+		handleAnthropicStreamingResponseWithMetrics(c, resp, &anthReq, startTime, accountIdentifier, s.metricsService)
 	} else {
-		handleAnthropicNonStreamingResponse(c, resp, &anthReq, startTime, accountIdentifier)
+		handleAnthropicNonStreamingResponseWithMetrics(c, resp, &anthReq, startTime, accountIdentifier, s.metricsService)
 	}
 }

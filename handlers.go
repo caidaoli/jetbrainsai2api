@@ -24,17 +24,17 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	// Panic 恢复机制和性能追踪
 	var account *JetbrainsAccount
 	var resp *http.Response
-	defer withPanicRecovery(c, startTime, &account, &resp, s.accountManager, APIFormatOpenAI)()
-	defer trackPerformance(startTime)()
+	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &account, &resp, s.accountManager, APIFormatOpenAI)()
+	defer trackPerformanceWithMetrics(s.metricsService, startTime)()
 
 	var request ChatCompletionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		recordRequestResult(false, startTime, "", "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, "", "")
 		respondWithOpenAIError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	modelConfig := getModelConfigOrError(c, s.modelsData, request.Model, startTime, APIFormatOpenAI)
+	modelConfig := getModelConfigOrErrorWithMetrics(c, s.metricsService, s.modelsData, request.Model, startTime, APIFormatOpenAI)
 	if modelConfig == nil {
 		return
 	}
@@ -43,7 +43,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	var err error
 	account, err = s.accountManager.AcquireAccount(c.Request.Context())
 	if err != nil {
-		recordRequestResult(false, startTime, request.Model, "")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
 		respondWithOpenAIError(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
@@ -60,7 +60,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	// SRP: 职责分离 - 工具处理由 RequestProcessor 负责
 	toolsResult := s.requestProcessor.ProcessTools(&request)
 	if toolsResult.Error != nil {
-		recordRequestResult(false, startTime, request.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
 		respondWithOpenAIError(c, http.StatusBadRequest, toolsResult.Error.Error())
 		return
 	}
@@ -69,7 +69,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	// SRP: 职责分离 - payload 构建由 RequestProcessor 负责
 	payloadBytes, err := s.requestProcessor.BuildJetbrainsPayload(&request, jetbrainsMessages, toolsResult.Data)
 	if err != nil {
-		recordRequestResult(false, startTime, request.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
 		respondWithOpenAIError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -78,7 +78,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	// SRP: 职责分离 - HTTP 请求发送由 RequestProcessor 负责
 	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, account)
 	if err != nil {
-		recordRequestResult(false, startTime, request.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
 		respondWithOpenAIError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -89,14 +89,14 @@ func (s *Server) chatCompletions(c *gin.Context) {
 		body, _ := io.ReadAll(resp.Body)
 		errorMsg := string(body)
 		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
-		recordRequestResult(false, startTime, request.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
 		c.JSON(resp.StatusCode, gin.H{"error": errorMsg})
 		return
 	}
 
 	if request.Stream {
-		handleStreamingResponse(c, resp, request, startTime, accountIdentifier)
+		handleStreamingResponseWithMetrics(c, resp, request, startTime, accountIdentifier, s.metricsService)
 	} else {
-		handleNonStreamingResponse(c, resp, request, startTime, accountIdentifier)
+		handleNonStreamingResponseWithMetrics(c, resp, request, startTime, accountIdentifier, s.metricsService)
 	}
 }

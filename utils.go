@@ -108,14 +108,14 @@ func extractTextContent(content any) string {
 // 统计记录工具
 // ============================================================================
 
-// recordSuccess 记录成功的请求及其响应时间
-func recordSuccess(startTime time.Time, model, account string) {
-	recordRequest(true, time.Since(startTime).Milliseconds(), model, account)
+// recordSuccessWithMetrics 记录成功的请求（使用注入的 MetricsService）
+func recordSuccessWithMetrics(metrics *MetricsService, startTime time.Time, model, account string) {
+	metrics.RecordRequest(true, time.Since(startTime).Milliseconds(), model, account)
 }
 
-// recordFailureWithTimer 记录失败的请求及其响应时间
-func recordFailureWithTimer(startTime time.Time, model, account string) {
-	recordRequest(false, time.Since(startTime).Milliseconds(), model, account)
+// recordFailureWithMetrics 记录失败的请求（使用注入的 MetricsService）
+func recordFailureWithMetrics(metrics *MetricsService, startTime time.Time, model, account string) {
+	metrics.RecordRequest(false, time.Since(startTime).Milliseconds(), model, account)
 }
 
 // ============================================================================

@@ -12,9 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// handleAnthropicStreamingResponse 处理流式响应 (Anthropic 格式)
-// SRP: 专门处理 Anthropic 流式响应的单一职责
-func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string) {
+// handleAnthropicStreamingResponseWithMetrics 处理流式响应 (Anthropic 格式，带注入的 MetricsService)
+func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
 	defer resp.Body.Close()
 
 	// 设置 Anthropic 流式响应头
@@ -147,23 +146,22 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 	c.Writer.Flush()
 
 	if hasContent {
-		recordSuccess(startTime, anthReq.Model, accountIdentifier)
+		recordSuccessWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 		Debug("Anthropic streaming response completed successfully")
 	} else {
-		recordFailureWithTimer(startTime, anthReq.Model, accountIdentifier)
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 		Warn("Anthropic streaming response completed with no content")
 	}
 }
 
-// handleAnthropicNonStreamingResponse 处理非流式响应 (Anthropic 格式)
-// SRP: 专门处理 Anthropic 非流式响应的单一职责
-func handleAnthropicNonStreamingResponse(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string) {
+// handleAnthropicNonStreamingResponseWithMetrics 处理非流式响应 (Anthropic 格式，带注入的 MetricsService)
+func handleAnthropicNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
 	defer resp.Body.Close()
 
 	// 读取完整响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		recordFailureWithTimer(startTime, anthReq.Model, accountIdentifier)
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, http.StatusInternalServerError, AnthropicErrorAPI,
 			"Failed to read response body")
 		return
@@ -174,13 +172,13 @@ func handleAnthropicNonStreamingResponse(c *gin.Context, resp *http.Response, an
 	// 直接转换 JetBrains 响应为 Anthropic 格式 (KISS: 消除中间转换)
 	anthResp, err := parseJetbrainsToAnthropicDirect(body, anthReq.Model)
 	if err != nil {
-		recordFailureWithTimer(startTime, anthReq.Model, accountIdentifier)
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, http.StatusInternalServerError, AnthropicErrorAPI,
 			fmt.Sprintf("Failed to parse response: %v", err))
 		return
 	}
 
-	recordSuccess(startTime, anthReq.Model, accountIdentifier)
+	recordSuccessWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 	c.JSON(http.StatusOK, anthResp)
 
 	Debug("Anthropic non-streaming response completed successfully: id=%s", anthResp.ID)
