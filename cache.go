@@ -32,6 +32,28 @@ type CacheItem struct {
 	next       *CacheItem
 }
 
+// deepCopyValue 使用 JSON 序列化实现深拷贝
+// 用于防止缓存数据被外部修改（TOCTOU 竞态条件）
+// 注意：仅适用于可 JSON 序列化的类型
+func deepCopyValue(src any) (any, error) {
+	if src == nil {
+		return nil, nil
+	}
+
+	// 使用 JSON 序列化/反序列化实现深拷贝
+	data, err := sonic.Marshal(src)
+	if err != nil {
+		return nil, err
+	}
+
+	var dst any
+	if err := sonic.Unmarshal(data, &dst); err != nil {
+		return nil, err
+	}
+
+	return dst, nil
+}
+
 // NewCache creates a new LRU Cache with optimized capacity.
 func NewCache() *LRUCache {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,6 +192,20 @@ func (c *LRUCache) cleanupExpired() {
 	}
 }
 
+
+// Clear 清空所有缓存项
+func (c *LRUCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 重置链表
+	c.head.next = c.tail
+	c.tail.prev = c.head
+
+	// 清空 map
+	c.items = make(map[string]*CacheItem)
+}
+
 // CacheService 统一缓存服务
 // SRP: 单一职责 - 只负责缓存管理
 type CacheService struct {
@@ -191,22 +227,62 @@ func NewCacheService() *CacheService {
 
 // GetMessageCache 获取消息转换缓存
 func (cs *CacheService) GetMessageCache(key string) (any, bool) {
-	return cs.messages.Get(key)
+	cached, found := cs.messages.Get(key)
+	if !found {
+		return nil, false
+	}
+
+	// 深拷贝：防止返回的数据被外部修改
+	copied, err := deepCopyValue(cached)
+	if err != nil {
+		Warn("Deep copy failed for message cache key %s: %v", key[:min(16, len(key))], err)
+		return cached, true
+	}
+
+	return copied, true
 }
 
 // SetMessageCache 设置消息转换缓存
 func (cs *CacheService) SetMessageCache(key string, value any, duration time.Duration) {
-	cs.messages.Set(key, value, duration)
+	// 深拷贝：防止外部修改影响缓存
+	copied, err := deepCopyValue(value)
+	if err != nil {
+		Warn("Deep copy failed for message cache key %s: %v", key[:min(16, len(key))], err)
+		cs.messages.Set(key, value, duration)
+		return
+	}
+
+	cs.messages.Set(key, copied, duration)
 }
 
 // GetToolCache 获取工具验证缓存
 func (cs *CacheService) GetToolCache(key string) (any, bool) {
-	return cs.tools.Get(key)
+	cached, found := cs.tools.Get(key)
+	if !found {
+		return nil, false
+	}
+
+	// 深拷贝：防止返回的数据被外部修改
+	copied, err := deepCopyValue(cached)
+	if err != nil {
+		Warn("Deep copy failed for tool cache key %s: %v", key[:min(16, len(key))], err)
+		return cached, true
+	}
+
+	return copied, true
 }
 
 // SetToolCache 设置工具验证缓存
 func (cs *CacheService) SetToolCache(key string, value any, duration time.Duration) {
-	cs.tools.Set(key, value, duration)
+	// 深拷贝：防止外部修改影响缓存
+	copied, err := deepCopyValue(value)
+	if err != nil {
+		Warn("Deep copy failed for tool cache key %s: %v", key[:min(16, len(key))], err)
+		cs.tools.Set(key, value, duration)
+		return
+	}
+
+	cs.tools.Set(key, copied, duration)
 }
 
 // GetQuotaCache 获取配额缓存 (修复 TOCTOU 竞态条件 - 返回深拷贝)
@@ -290,35 +366,95 @@ func (cs *CacheService) DeleteQuotaCache(key string) {
 
 // ClearQuotaCache 清空所有配额缓存
 func (cs *CacheService) ClearQuotaCache() {
-	cs.quota.mu.Lock()
-	defer cs.quota.mu.Unlock()
+	cs.quota.Clear()
+}
 
-	// 重置链表
-	cs.quota.head.next = cs.quota.tail
-	cs.quota.tail.prev = cs.quota.head
 
-	// 清空 map
-	cs.quota.items = make(map[string]*CacheItem)
+// ClearMessageCache 清空所有消息转换缓存
+func (cs *CacheService) ClearMessageCache() {
+	cs.messages.Clear()
+}
+
+// ClearToolCache 清空所有工具验证缓存
+func (cs *CacheService) ClearToolCache() {
+	cs.tools.Clear()
+}
+
+// ClearParamCache 清空所有参数转换缓存
+func (cs *CacheService) ClearParamCache() {
+	cs.params.Clear()
+}
+
+// ClearAll 清空所有缓存
+// 用于配置变更或需要完全重置缓存状态时
+func (cs *CacheService) ClearAll() {
+	cs.ClearMessageCache()
+	cs.ClearToolCache()
+	cs.ClearQuotaCache()
+	cs.ClearParamCache()
+	Info("All caches cleared")
 }
 
 // GetParamCache 获取参数转换缓存
 func (cs *CacheService) GetParamCache(key string) (any, bool) {
-	return cs.params.Get(key)
+	cached, found := cs.params.Get(key)
+	if !found {
+		return nil, false
+	}
+
+	// 深拷贝：防止返回的数据被外部修改
+	copied, err := deepCopyValue(cached)
+	if err != nil {
+		Warn("Deep copy failed for param cache key %s: %v", key[:min(16, len(key))], err)
+		return cached, true
+	}
+
+	return copied, true
 }
 
 // SetParamCache 设置参数转换缓存
 func (cs *CacheService) SetParamCache(key string, value any, duration time.Duration) {
-	cs.params.Set(key, value, duration)
+	// 深拷贝：防止外部修改影响缓存
+	copied, err := deepCopyValue(value)
+	if err != nil {
+		Warn("Deep copy failed for param cache key %s: %v", key[:min(16, len(key))], err)
+		cs.params.Set(key, value, duration)
+		return
+	}
+
+	cs.params.Set(key, copied, duration)
 }
 
 // Get 实现 Cache 接口（统一获取方法，默认使用 messages 缓存）
 func (cs *CacheService) Get(key string) (any, bool) {
-	return cs.messages.Get(key)
+	cached, found := cs.messages.Get(key)
+	if !found {
+		return nil, false
+	}
+
+	// 深拷贝：防止返回的数据被外部修改（TOCTOU 竞态条件）
+	copied, err := deepCopyValue(cached)
+	if err != nil {
+		// 深拷贝失败，记录警告并返回原值（降级处理）
+		Warn("Deep copy failed for cache key %s: %v", key[:min(16, len(key))], err)
+		return cached, true
+	}
+
+	return copied, true
 }
 
 // Set 实现 Cache 接口（统一设置方法，默认使用 messages 缓存）
 func (cs *CacheService) Set(key string, value any, duration time.Duration) {
-	cs.messages.Set(key, value, duration)
+	// 深拷贝：防止外部修改影响缓存数据（TOCTOU 竞态条件）
+	copied, err := deepCopyValue(value)
+	if err != nil {
+		// 深拷贝失败，记录警告并存储原值（降级处理）
+		Warn("Deep copy failed for cache key %s: %v", key[:min(16, len(key))], err)
+		cs.messages.Set(key, value, duration)
+		return
+	}
+
+	cs.messages.Set(key, copied, duration)
 }
 
 // Stop 实现 Cache 接口

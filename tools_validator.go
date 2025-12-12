@@ -46,9 +46,70 @@ func ValidateAndTransformTools(tools []Tool, cache Cache) ([]Tool, error) {
 	cacheKey := generateToolsCacheKey(tools)
 	if cached, found := cache.Get(cacheKey); found {
 		RecordCacheHit()
-		return cached.([]Tool), nil
+		// 安全的类型断言，防止缓存污染导致panic
+		if validatedTools, ok := cached.([]Tool); ok {
+			return validatedTools, nil
+		}
+		// 缓存格式错误，重新验证
+		RecordCacheMiss()
+	} else {
+		RecordCacheMiss()
 	}
-	RecordCacheMiss()
+
+	validatedTools := make([]Tool, 0, len(tools))
+
+	for _, tool := range tools {
+		// 验证工具名称
+		if !isValidParamName(tool.Function.Name) {
+			Debug("Invalid tool name: %s, skipping tool", tool.Function.Name)
+			continue
+		}
+
+		// 转换参数 Schema
+		transformedParams, err := transformParameters(tool.Function.Parameters)
+		if err != nil {
+			Debug("Failed to transform tool %s parameters: %v", tool.Function.Name, err)
+			continue
+		}
+
+		// 创建验证后的工具
+		validatedTool := Tool{
+			Type: tool.Type,
+			Function: ToolFunction{
+				Name:        tool.Function.Name,
+				Description: tool.Function.Description,
+				Parameters:  transformedParams,
+			},
+		}
+
+		validatedTools = append(validatedTools, validatedTool)
+	}
+
+	// 缓存验证结果（30分钟 TTL）
+	cache.Set(cacheKey, validatedTools, ToolsValidationCacheTTL)
+
+	return validatedTools, nil
+}
+
+// ValidateAndTransformToolsWithMetrics 验证并转换工具定义（带指标收集）
+// 这是推荐的新版本，完全消除对全局变量的依赖
+func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics MetricsCollector) ([]Tool, error) {
+	if len(tools) == 0 {
+		return tools, nil
+	}
+
+	// 检查缓存
+	cacheKey := generateToolsCacheKey(tools)
+	if cached, found := cache.Get(cacheKey); found {
+		metrics.RecordCacheHit()
+		if validatedTools, ok := cached.([]Tool); ok {
+			return validatedTools, nil
+		}
+		// 缓存格式错误，重新验证
+		metrics.RecordCacheMiss()
+	} else {
+		metrics.RecordCacheMiss()
+	}
 
 	validatedTools := make([]Tool, 0, len(tools))
 
