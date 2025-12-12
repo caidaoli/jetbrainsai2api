@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"time"
 
@@ -337,6 +338,7 @@ func (cs *CacheService) Close() error {
 // 缓存键生成函数
 
 // generateMessagesCacheKey creates a cache key from chat messages.
+// 包含版本号前缀，避免格式变更导致的缓存污染
 func generateMessagesCacheKey(messages []ChatMessage) string {
 	// 优化: 使用流式hash，避免大量内存分配
 	h := sha1.New()
@@ -346,10 +348,11 @@ func generateMessagesCacheKey(messages []ChatMessage) string {
 			h.Write([]byte(content))
 		}
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return fmt.Sprintf("msg:%s:%s", CacheKeyVersion, hex.EncodeToString(h.Sum(nil)))
 }
 
 // generateToolsCacheKey creates a cache key from a slice of tools.
+// 包含版本号前缀，避免格式变更导致的缓存污染
 func generateToolsCacheKey(tools []Tool) string {
 	// 优化: 使用流式hash，避免大量内存分配
 	h := sha1.New()
@@ -357,18 +360,20 @@ func generateToolsCacheKey(tools []Tool) string {
 		h.Write([]byte(t.Type))
 		h.Write([]byte(t.Function.Name))
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return fmt.Sprintf("tools:%s:%s", CacheKeyVersion, hex.EncodeToString(h.Sum(nil)))
 }
 
 // generateParamsCacheKey creates a cache key from parameter schemas
+// 包含版本号前缀，避免格式变更导致的缓存污染
 func generateParamsCacheKey(params map[string]any) string {
 	// 使用 Sonic 快速序列化
 	data, _ := marshalJSON(params)
 	hash := sha1.Sum(data)
-	return hex.EncodeToString(hash[:])
+	return fmt.Sprintf("params:%s:%s", CacheKeyVersion, hex.EncodeToString(hash[:]))
 }
 
 // generateQuotaCacheKey creates a cache key for quota data
+// 包含版本号前缀，避免格式变更导致的缓存污染
 func generateQuotaCacheKey(account *JetbrainsAccount) string {
 	// 修复: 使用 licenseID 作为缓存键而非 JWT，避免敏感信息泄露
 	cacheKey := account.LicenseID
@@ -380,7 +385,7 @@ func generateQuotaCacheKey(account *JetbrainsAccount) string {
 			cacheKey = account.JWT
 		}
 	}
-	return cacheKey
+	return fmt.Sprintf("quota:%s:%s", CacheKeyVersion, cacheKey)
 }
 
 // Helper function to marshal JSON, using Sonic for performance
@@ -388,6 +393,19 @@ func marshalJSON(v any) ([]byte, error) {
 	return sonic.Marshal(v)
 }
 
-// 全局 CacheService 实例
-// 新代码应该使用依赖注入的 CacheService，此全局实例仅用于向后兼容
+// ============================================================================
+// 全局变量（向后兼容 - 已废弃）
+// ============================================================================
+
+// globalCacheService 全局 CacheService 实例
+//
+// Deprecated: 此全局变量仅用于向后兼容旧代码。
+// 新代码应该通过 Server 或 AccountManager 的依赖注入获取 CacheService。
+//
+// 迁移指南：
+// - 在 handlers 中使用 s.cache (Server.cache)
+// - 在 AccountManager 中使用 am.cache
+// - 在新模块中通过构造函数注入 Cache 接口
+//
+// 计划在下一个主版本中移除此全局变量。
 var globalCacheService = NewCacheService()

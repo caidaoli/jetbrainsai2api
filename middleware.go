@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -11,6 +12,20 @@ import (
 // HTTP 中间件
 // SRP: 单一职责 - 每个中间件只负责一件事
 // ============================================================================
+
+// isValidClientKey 使用常量时间比较来验证客户端密钥
+// 防止 timing attack 攻击
+func (s *Server) isValidClientKey(providedKey string) bool {
+	providedBytes := []byte(providedKey)
+	for validKey := range s.validClientKeys {
+		validBytes := []byte(validKey)
+		// 使用常量时间比较，避免 timing attack
+		if subtle.ConstantTimeCompare(providedBytes, validBytes) == 1 {
+			return true
+		}
+	}
+	return false
+}
 
 // corsMiddleware CORS中间件
 // 允许跨域请求，支持常见的 HTTP 方法和头部
@@ -34,6 +49,7 @@ func (s *Server) corsMiddleware() gin.HandlerFunc {
 // 支持两种认证方式：
 // 1. Authorization: Bearer <token>
 // 2. x-api-key: <token>
+// 使用常量时间比较防止 timing attack
 func (s *Server) authenticateClient(c *gin.Context) {
 	if len(s.validClientKeys) == 0 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service unavailable: no client API keys configured"})
@@ -46,7 +62,7 @@ func (s *Server) authenticateClient(c *gin.Context) {
 
 	// Check x-api-key first
 	if apiKey != "" {
-		if s.validClientKeys[apiKey] {
+		if s.isValidClientKey(apiKey) {
 			return
 		}
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid client API key (x-api-key)"})
@@ -57,7 +73,7 @@ func (s *Server) authenticateClient(c *gin.Context) {
 	// Check Authorization header
 	if authHeader != "" {
 		token := strings.TrimPrefix(authHeader, AuthBearerPrefix)
-		if s.validClientKeys[token] {
+		if s.isValidClientKey(token) {
 			return
 		}
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid client API key (Bearer token)"})

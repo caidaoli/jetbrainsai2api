@@ -44,8 +44,7 @@ type Server struct {
 // NewServer 创建新的服务器实例
 // OCP: 通过配置开放扩展，对修改封闭
 func NewServer(config ServerConfig) (*Server, error) {
-	// 初始化日志系统
-	InitializeLogger()
+	// 注意: InitializeLogger 已在 main.go 中调用，此处不再重复初始化
 	Info("Initializing server with %d accounts", len(config.JetbrainsAccounts))
 
 	// 创建 HTTP 客户端（必须先创建，因为 AccountManager 需要它）

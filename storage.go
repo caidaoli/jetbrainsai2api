@@ -166,10 +166,24 @@ func initStorage() (StorageInterface, error) {
 	return NewFileStorage(StatsFilePath), nil
 }
 
-// 全局变量（向后兼容，逐步迁移到依赖注入）
+// ============================================================================
+// 全局变量（向后兼容 - 已废弃）
+// ============================================================================
+
+// storage 全局存储实例
+//
+// Deprecated: 此全局变量仅用于向后兼容旧代码。
+// 新代码应该通过 MetricsService 或依赖注入获取 StorageInterface。
+//
+// 迁移指南：
+// - 使用 MetricsService 进行统计数据的保存和加载
+// - 在新模块中通过构造函数注入 StorageInterface
+//
+// 计划在下一个主版本中移除此全局变量。
 var storage StorageInterface
 
 // initStorageGlobal 初始化全局存储（向后兼容）
+// Deprecated: 使用 NewFileStorage() 或 NewRedisStorage() 并通过依赖注入替代
 func initStorageGlobal() error {
 	var err error
 	storage, err = initStorage()

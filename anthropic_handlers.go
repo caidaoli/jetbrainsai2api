@@ -13,6 +13,9 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	startTime := time.Now()
 
 	// Panic 恢复机制和性能追踪
+	var account *JetbrainsAccount
+	var resp *http.Response
+	defer withPanicRecovery(c, startTime, &account, &resp, s.accountManager, APIFormatAnthropic)()
 	defer trackPerformance(startTime)()
 
 	var anthReq AnthropicMessagesRequest
@@ -59,7 +62,8 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	}
 
 	// 使用 AccountManager 获取账户
-	account, err := s.accountManager.AcquireAccount(c.Request.Context())
+	var err error
+	account, err = s.accountManager.AcquireAccount(c.Request.Context())
 	if err != nil {
 		recordRequestResult(false, startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusTooManyRequests, AnthropicErrorRateLimit, err.Error())
@@ -99,7 +103,8 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	}
 
 	// 直接调用 JetBrains API
-	jetbrainsResponse, statusCode, err := s.callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
+	var statusCode int
+	resp, statusCode, err = s.callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
 	if err != nil {
 		recordRequestResult(false, startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, statusCode, AnthropicErrorAPI, err.Error())
@@ -109,8 +114,8 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	// 根据是否流式处理响应
 	isStream := anthReq.Stream != nil && *anthReq.Stream
 	if isStream {
-		handleAnthropicStreamingResponse(c, jetbrainsResponse, &anthReq, startTime, accountIdentifier)
+		handleAnthropicStreamingResponse(c, resp, &anthReq, startTime, accountIdentifier)
 	} else {
-		handleAnthropicNonStreamingResponse(c, jetbrainsResponse, &anthReq, startTime, accountIdentifier)
+		handleAnthropicNonStreamingResponse(c, resp, &anthReq, startTime, accountIdentifier)
 	}
 }

@@ -626,10 +626,22 @@ func (ms *MetricsService) Close() error {
 	return nil
 }
 
-// 全局实例（向后兼容，逐步迁移到依赖注入）
-// 新代码应该使用注入的 MetricsService
+// ============================================================================
+// 全局变量（向后兼容 - 已废弃）
+// ============================================================================
+
+// atomicStats 全局请求统计实例
+//
+// Deprecated: 此全局变量仅用于向后兼容旧代码。
+// 新代码应该通过 MetricsService 进行统计记录。
+//
+// 迁移指南：
+// - 使用 MetricsService.RecordRequest() 替代 recordRequest()
+// - 通过依赖注入获取 MetricsService 实例
+//
+// 计划在下一个主版本中移除此全局变量。
 var (
-	atomicStats = NewAtomicRequestStats() // 保留用于向后兼容
+	atomicStats = NewAtomicRequestStats()
 )
 
 // 向后兼容的全局函数
@@ -743,9 +755,24 @@ func loadStats() {
 	atomicStats.LoadFromStats(stats)
 }
 
-// 全局性能指标函数（向后兼容）
+// metrics 全局性能指标实例
+//
+// Deprecated: 此全局变量仅用于向后兼容旧代码。
+// 新代码应该通过 MetricsService 或 MetricsCollector 接口进行指标记录。
+//
+// 迁移指南：
+// - 使用注入的 MetricsCollector 接口
+// - 在新模块中通过构造函数注入 MetricsCollector
+//
+// 计划在下一个主版本中移除此全局变量。
 var metrics = NewPerformanceMetrics()
 
+// ============================================================================
+// 向后兼容的全局函数（已废弃）
+// ============================================================================
+
+// RecordHTTPRequest 记录 HTTP 请求
+// Deprecated: 使用注入的 MetricsCollector.RecordHTTPRequest() 替代
 func RecordHTTPRequest(duration time.Duration) {
 	metrics.mu.Lock()
 	defer metrics.mu.Unlock()

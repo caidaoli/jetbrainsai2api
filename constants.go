@@ -55,6 +55,10 @@ const (
 
 	// ToolsValidationCacheTTL 工具验证缓存TTL
 	ToolsValidationCacheTTL = 30 * time.Minute
+
+	// CacheKeyVersion 缓存键版本号
+	// 当缓存数据格式发生变化时，增加此版本号以避免使用旧格式的缓存数据
+	CacheKeyVersion = "v1"
 )
 
 // ==================== 统计和性能监控常量 ====================

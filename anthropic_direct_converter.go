@@ -170,13 +170,12 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close() // 关闭原始 body，避免资源泄漏
 		errorMsg := string(body)
 		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
 
-		// 重新创建 response body reader，以便后续处理
-		resp.Body = io.NopCloser(bytes.NewReader(body))
-
-		return resp, resp.StatusCode, fmt.Errorf("JetBrains API error: %d", resp.StatusCode)
+		// 返回 nil response，因为调用者在错误情况下不会使用响应
+		return nil, resp.StatusCode, fmt.Errorf("JetBrains API error: %d - %s", resp.StatusCode, errorMsg)
 	}
 
 	return resp, http.StatusOK, nil

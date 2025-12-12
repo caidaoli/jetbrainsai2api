@@ -14,6 +14,9 @@ import (
 )
 
 var (
+	// jwtRefreshMutex 用于同步 JWT 刷新操作，防止多个 goroutine 同时刷新同一账户的 JWT
+	// TODO: 考虑将此 mutex 移至 JetbrainsAccount 结构体中，实现 per-account 锁定，
+	// 减少不同账户之间的锁竞争
 	jwtRefreshMutex sync.Mutex
 )
 
@@ -124,7 +127,11 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 		account.JWT = tokenStr
 		account.LastUpdated = float64(time.Now().Unix())
 
-		// Parse the JWT to get the expiration time
+		// SECURITY NOTE: 使用 ParseUnverified 是安全的，因为：
+		// 1. JWT 刚从 JetBrains 官方 API 获取，来源可信
+		// 2. 我们只读取 exp (过期时间) 字段用于本地缓存管理
+		// 3. 实际的 JWT 验证由 JetBrains API 在使用时完成
+		// 不要将此模式用于验证用户提供的 token 或信任其他 claims
 		token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
 		if err != nil {
 			Warn("could not parse JWT: %v", err)

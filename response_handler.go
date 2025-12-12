@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -26,9 +27,17 @@ func generateShortToolCallID() string {
 
 // processJetbrainsStream processes the event stream from the JetBrains API.
 // It calls the provided onEvent function for each event in the stream.
-func processJetbrainsStream(resp *http.Response, onEvent func(event map[string]any) bool) {
+// Returns error if stream reading fails or context is cancelled.
+func processJetbrainsStream(ctx context.Context, resp *http.Response, onEvent func(event map[string]any) bool) error {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
+		// 检查 context 是否已取消（客户端断开连接）
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		line := scanner.Text()
 
 		if !strings.HasPrefix(line, StreamChunkPrefix) || line == StreamEndLine {
@@ -46,6 +55,13 @@ func processJetbrainsStream(resp *http.Response, onEvent func(event map[string]a
 			break
 		}
 	}
+
+	// 检查 scanner 是否遇到错误
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("stream read error: %w", err)
+	}
+
+	return nil
 }
 
 // handleStreamingResponse handles streaming responses from the JetBrains API
@@ -56,7 +72,10 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 	firstChunkSent := false
 	var currentTool *map[string]any
 
-	processJetbrainsStream(resp, func(data map[string]any) bool {
+	// 使用请求的 context 来检测客户端断开
+	ctx := c.Request.Context()
+
+	err := processJetbrainsStream(ctx, resp, func(data map[string]any) bool {
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -187,6 +206,17 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 		return true // Continue processing
 	})
 
+	// 处理流处理过程中的错误
+	if err != nil {
+		if ctx.Err() != nil {
+			// 客户端断开连接，记录但不报错
+			Debug("Client disconnected during streaming: %v", err)
+		} else {
+			// 其他流处理错误
+			Error("Stream processing error: %v", err)
+		}
+	}
+
 	recordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
 }
 
@@ -197,7 +227,10 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 	var currentFuncName string
 	var currentFuncArgs string
 
-	processJetbrainsStream(resp, func(data map[string]any) bool {
+	// 使用请求的 context 来检测客户端断开
+	ctx := c.Request.Context()
+
+	err := processJetbrainsStream(ctx, resp, func(data map[string]any) bool {
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -275,6 +308,15 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 		}
 		return true // Continue processing
 	})
+
+	// 处理流处理过程中的错误
+	if err != nil {
+		if ctx.Err() != nil {
+			Debug("Client disconnected during non-streaming response: %v", err)
+		} else {
+			Error("Stream processing error in non-streaming handler: %v", err)
+		}
+	}
 
 	message := ChatMessage{
 		Role:    RoleAssistant,

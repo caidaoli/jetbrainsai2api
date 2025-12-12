@@ -39,7 +39,16 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 
 	Debug("=== JetBrains Streaming Response Debug ===")
 
+	ctx := c.Request.Context()
 	for scanner.Scan() {
+		// 检查 context 是否已取消（客户端断开连接）
+		select {
+		case <-ctx.Done():
+			Debug("Client disconnected during streaming, stopping")
+			return
+		default:
+		}
+
 		line := scanner.Text()
 		lineCount++
 
@@ -83,15 +92,6 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 				// 发送 content_block_delta 事件 (Anthropic 格式)
 				contentBlockDeltaData := generateAnthropicStreamResponse(StreamEventTypeContentBlockDelta, content, 0)
 
-				// 检查连接状态
-				select {
-				case <-c.Request.Context().Done():
-					Debug("Line %d: Client disconnected during streaming, stopping", lineCount)
-					return
-				default:
-					// 连接正常，继续发送
-				}
-
 				bytesWritten, err := c.Writer.Write([]byte(AnthropicEventContentBlockDelta))
 				if err != nil {
 					Debug("Line %d: Failed to write event header: %v", lineCount, err)
@@ -116,6 +116,15 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 			}
 		} else {
 			Debug("Line %d: Not SSE data format, raw line: '%s'", lineCount, line)
+		}
+	}
+
+	// 检查 scanner 是否遇到错误
+	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			Debug("Client disconnected during streaming: %v", err)
+		} else {
+			Error("Stream read error: %v", err)
 		}
 	}
 
