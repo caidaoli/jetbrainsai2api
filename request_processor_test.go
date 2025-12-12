@@ -41,11 +41,6 @@ func newMockLogger() Logger {
 	return &mockLogger{}
 }
 
-func init() {
-	// 初始化测试环境
-	InitializeLogger()
-}
-
 func TestRequestProcessor_ProcessMessages(t *testing.T) {
 	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
 

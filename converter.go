@@ -1,6 +1,8 @@
 package main
 
 import (
+	"sync"
+
 	"github.com/bytedance/sonic"
 )
 
@@ -15,6 +17,16 @@ type MessageConverter struct {
 	validator           *ImageValidator
 }
 
+// converterPool 对象池，复用 MessageConverter 减少内存分配
+var converterPool = sync.Pool{
+	New: func() any {
+		return &MessageConverter{
+			toolIDToFuncNameMap: make(map[string]string, 8), // 预分配容量
+			validator:           NewImageValidator(),
+		}
+	},
+}
+
 // NewMessageConverter 创建新的消息转换器
 func NewMessageConverter() *MessageConverter {
 	return &MessageConverter{
@@ -24,8 +36,14 @@ func NewMessageConverter() *MessageConverter {
 }
 
 // openAIToJetbrainsMessages converts OpenAI chat messages to JetBrains format
+// 使用对象池复用 MessageConverter，减少内存分配
 func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
-	converter := NewMessageConverter()
+	converter := converterPool.Get().(*MessageConverter)
+	defer func() {
+		// 清理 map 但保留容量
+		clear(converter.toolIDToFuncNameMap)
+		converterPool.Put(converter)
+	}()
 	return converter.Convert(messages)
 }
 

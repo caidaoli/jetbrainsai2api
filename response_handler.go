@@ -69,6 +69,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	setStreamingHeaders(c, APIFormatOpenAI)
 
 	streamID := ResponseIDPrefix + uuid.New().String()
+	created := time.Now().Unix() // 预计算时间戳，避免每个 chunk 都调用 time.Now()
 	firstChunkSent := false
 	var currentTool *map[string]any
 
@@ -101,7 +102,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			streamResp := StreamResponse{
 				ID:      streamID,
 				Object:  ChatCompletionChunkObjectType,
-				Created: time.Now().Unix(),
+				Created: created,
 				Model:   request.Model,
 				Choices: []StreamChoice{{Delta: deltaPayload}},
 			}

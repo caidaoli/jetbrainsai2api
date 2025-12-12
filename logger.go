@@ -182,8 +182,8 @@ func createLogger() Logger {
 	return NewAppLoggerWithConfig(output, debugMode)
 }
 
-// ==================== 全局日志实例（向后兼容）====================
-// Deprecated: appLogger 全局变量已移除，请通过依赖注入获取
+// ==================== 全局日志实例（简化版）====================
+// 注意：新代码应通过依赖注入获取 Logger，避免使用全局函数
 //
 // 迁移状态：
 // ✅ main.go: 已迁移至 createLogger() + 配置注入
@@ -191,106 +191,51 @@ func createLogger() Logger {
 // ✅ request_processor.go: 已通过构造函数注入 Logger
 // ✅ response_handler.go: 已通过函数参数注入 Logger
 // ✅ handlers.go: 已使用 s.config.Logger
-// ⚠️  辅助模块: 保留全局日志函数（主要是 Debug 日志，影响较小）
-//
-// 重构计划：
-// 1. [已完成] ServerConfig 添加 Logger 字段
-// 2. [已完成] main.go 使用 createLogger() 创建实例并注入
-// 3. [已完成] NewServer() 从配置获取 Logger
-// 4. [已完成] 核心组件迁移（RequestProcessor, ResponseHandler）
-// 5. [低优先级] 辅助模块（anthropic_*, config, cache 等）- Debug 日志为主
-//
-// 注意：全局实例仅用于向后兼容，新代码应使用依赖注入
+// ⚠️  辅助模块: 保留全局日志函数（anthropic_*, config 等）
 
-var (
-	appLogger     Logger
-	loggerInitMu  sync.Mutex
-	loggerInitOne sync.Once
-	// 默认日志实例（空指针保护）
-	defaultLogger = NewAppLoggerWithConfig(os.Stdout, false)
-)
+// defaultLogger 是全局日志实例，用于辅助模块的日志输出
+// 新代码应使用依赖注入，而非此全局实例
+var defaultLogger = NewAppLoggerWithConfig(os.Stdout, isDebugMode())
 
-// InitializeLogger 初始化全局日志系统，必须在加载环境变量后调用
-// 使用 sync.Once 确保只初始化一次，避免并发竞态条件
-// Deprecated: 全局日志已废弃，请使用 createLogger() 并通过依赖注入传递
-func InitializeLogger() {
-	loggerInitOne.Do(func() {
-		appLogger = NewAppLogger()
-	})
+// isDebugMode 检查是否为调试模式
+func isDebugMode() bool {
+	ginMode := os.Getenv("GIN_MODE")
+	return ginMode == "" || ginMode == "debug"
 }
 
 // CloseLogger 全局日志清理函数，供main.go调用
 func CloseLogger() error {
-	if appLogger != nil {
-		if l, ok := appLogger.(*AppLogger); ok {
-			return l.Close()
-		}
+	if defaultLogger != nil {
+		return defaultLogger.Close()
 	}
 	return nil
 }
 
-// ==================== 全局日志函数（空指针安全）====================
-// Deprecated: 全局日志函数将在未来版本移除，请使用注入的 Logger 接口
-//
-// 这些函数提供空指针保护，即使未初始化也能正常工作
-// 但它们隐藏了依赖关系，违反了依赖注入原则（DIP）
-//
-// 当前使用场景：
-// - 历史遗留代码：多个模块仍在使用全局日志函数
-// - 向后兼容：保留以避免破坏现有功能
-//
-// 迁移指南：
-// 旧代码：Info("Server started")
-// 新代码：logger.Info("Server started") // 通过构造函数注入 logger
-//
-// 请在新模块中通过构造函数注入 Logger 接口，避免使用全局函数
+// ==================== 全局日志函数（向后兼容）====================
+// 这些函数用于尚未迁移到依赖注入的辅助模块
+// 新模块请通过构造函数注入 Logger 接口
 
-// Debug 全局调试日志函数（带空指针保护）
-// Deprecated: 请使用注入的 Logger 接口，而非全局日志函数
+// Debug 全局调试日志函数
 func Debug(format string, args ...any) {
-	if appLogger != nil {
-		appLogger.Debug(format, args...)
-	} else {
-		defaultLogger.Debug(format, args...)
-	}
+	defaultLogger.Debug(format, args...)
 }
 
-// Info 全局信息日志函数（带空指针保护）
-// Deprecated: 请使用注入的 Logger 接口，而非全局日志函数
+// Info 全局信息日志函数
 func Info(format string, args ...any) {
-	if appLogger != nil {
-		appLogger.Info(format, args...)
-	} else {
-		defaultLogger.Info(format, args...)
-	}
+	defaultLogger.Info(format, args...)
 }
 
-// Warn 全局警告日志函数（带空指针保护）
-// Deprecated: 请使用注入的 Logger 接口，而非全局日志函数
+// Warn 全局警告日志函数
 func Warn(format string, args ...any) {
-	if appLogger != nil {
-		appLogger.Warn(format, args...)
-	} else {
-		defaultLogger.Warn(format, args...)
-	}
+	defaultLogger.Warn(format, args...)
 }
 
-// Error 全局错误日志函数（带空指针保护）
-// Deprecated: 请使用注入的 Logger 接口，而非全局日志函数
+// Error 全局错误日志函数
 func Error(format string, args ...any) {
-	if appLogger != nil {
-		appLogger.Error(format, args...)
-	} else {
-		defaultLogger.Error(format, args...)
-	}
+	defaultLogger.Error(format, args...)
 }
 
-// Fatal 全局致命错误日志函数（带空指针保护）
-// Deprecated: 请使用注入的 Logger 接口，而非全局日志函数
+// Fatal 全局致命错误日志函数
 func Fatal(format string, args ...any) {
-	if appLogger != nil {
-		appLogger.Fatal(format, args...)
-	} else {
-		defaultLogger.Fatal(format, args...)
-	}
+	defaultLogger.Fatal(format, args...)
 }

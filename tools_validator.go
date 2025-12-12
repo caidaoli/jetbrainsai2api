@@ -216,14 +216,11 @@ func transformPropertySchema(schema any, depth int) (map[string]any, error) {
 	result := make(map[string]any)
 
 	// 处理 anyOf/oneOf/allOf：简化为 string + 描述
-	if _, hasAnyOf := schemaMap["anyOf"]; hasAnyOf {
-		return simplifyUnionType(schemaMap, "anyOf"), nil
-	}
-	if _, hasOneOf := schemaMap["oneOf"]; hasOneOf {
-		return simplifyUnionType(schemaMap, "oneOf"), nil
-	}
-	if _, hasAllOf := schemaMap["allOf"]; hasAllOf {
-		return simplifyUnionType(schemaMap, "allOf"), nil
+	// DRY: 统一处理所有联合类型
+	for _, unionType := range []string{"anyOf", "oneOf", "allOf"} {
+		if _, hasUnion := schemaMap[unionType]; hasUnion {
+			return simplifyUnionType(schemaMap, unionType), nil
+		}
 	}
 
 	// 获取类型

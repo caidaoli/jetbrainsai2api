@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -91,6 +92,12 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 	tokenStr, _ := data["token"].(string)
 
 	if state == "PAID" && tokenStr != "" {
+		// 安全检查：验证 JWT 格式（三段式结构）
+		parts := strings.Split(tokenStr, ".")
+		if len(parts) != 3 {
+			return fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
+		}
+
 		account.JWT = tokenStr
 		account.LastUpdated = float64(time.Now().Unix())
 
