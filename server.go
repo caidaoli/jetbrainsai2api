@@ -122,7 +122,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		validClientKeys:  validClientKeys,
 		modelsData:       modelsData,
 		modelsConfig:     modelsConfig,
-		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cacheService, metricsService),
+		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cacheService, metricsService, config.Logger),
 		config:           config,
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,

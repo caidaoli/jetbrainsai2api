@@ -88,15 +88,15 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 		errorMsg := string(body)
-		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
+		s.config.Logger.Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
 		c.JSON(resp.StatusCode, gin.H{"error": errorMsg})
 		return
 	}
 
 	if request.Stream {
-		handleStreamingResponseWithMetrics(c, resp, request, startTime, accountIdentifier, s.metricsService)
+		handleStreamingResponseWithMetrics(c, resp, request, startTime, accountIdentifier, s.metricsService, s.config.Logger)
 	} else {
-		handleNonStreamingResponseWithMetrics(c, resp, request, startTime, accountIdentifier, s.metricsService)
+		handleNonStreamingResponseWithMetrics(c, resp, request, startTime, accountIdentifier, s.metricsService, s.config.Logger)
 	}
 }

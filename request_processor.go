@@ -15,15 +15,17 @@ type RequestProcessor struct {
 	httpClient   *http.Client
 	cache        Cache            // 注入缓存依赖
 	metrics      MetricsCollector // 注入指标收集器
+	logger       Logger           // 注入日志依赖
 }
 
 // NewRequestProcessor 创建新的请求处理器
-func NewRequestProcessor(modelsConfig ModelsConfig, httpClient *http.Client, cache Cache, metrics MetricsCollector) *RequestProcessor {
+func NewRequestProcessor(modelsConfig ModelsConfig, httpClient *http.Client, cache Cache, metrics MetricsCollector, logger Logger) *RequestProcessor {
 	return &RequestProcessor{
 		modelsConfig: modelsConfig,
 		httpClient:   httpClient,
 		cache:        cache,
 		metrics:      metrics,
+		logger:       logger,
 	}
 }
 
@@ -50,7 +52,7 @@ func (p *RequestProcessor) ProcessMessages(messages []ChatMessage) ProcessMessag
 			}
 		}
 		// 缓存格式错误，视为缓存失效，记录警告并重新生成
-		Warn("Cache format mismatch for messages (key: %s), regenerating", cacheKey[:16])
+		p.logger.Warn("Cache format mismatch for messages (key: %s), regenerating", cacheKey[:16])
 	}
 
 	// 缓存未命中或格式错误，执行转换
@@ -86,7 +88,7 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 	// 强制工具使用（如果提供了工具）
 	if request.ToolChoice == nil {
 		request.ToolChoice = ToolChoiceAny
-		Debug("FORCING tool_choice to '%s' for tool usage guarantee", ToolChoiceAny)
+		p.logger.Debug("FORCING tool_choice to '%s' for tool usage guarantee", ToolChoiceAny)
 	}
 
 	// 尝试从缓存获取验证结果（使用注入的 cache 而非全局变量）
@@ -102,7 +104,7 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 			}
 		}
 		// 缓存格式错误，视为缓存失效，记录警告并重新验证
-		Warn("Cache format mismatch for tools (key: %s), revalidating", toolsCacheKey[:16])
+		p.logger.Warn("Cache format mismatch for tools (key: %s), revalidating", toolsCacheKey[:16])
 	}
 
 	// 缓存未命中或格式错误，执行验证
@@ -155,11 +157,11 @@ func (p *RequestProcessor) buildToolsData(validatedTools []Tool) []JetbrainsData
 
 	toolsJSON, err := marshalJSON(jetbrainsTools)
 	if err != nil {
-		Warn("Failed to marshal tools: %v", err)
+		p.logger.Warn("Failed to marshal tools: %v", err)
 		return data
 	}
 
-	Debug("Transformed tools for JetBrains API: %s", string(toolsJSON))
+	p.logger.Debug("Transformed tools for JetBrains API: %s", string(toolsJSON))
 
 	// 添加工具定义数据
 	modifiedTime := time.Now().UnixMilli()
@@ -197,14 +199,14 @@ func (p *RequestProcessor) BuildJetbrainsPayload(
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	Debug("=== JetBrains API Request Debug ===")
-	Debug("Model: %s -> %s", request.Model, internalModel)
-	Debug("Messages processed: %d", len(messages))
-	Debug("Tools processed: %d", len(request.Tools))
-	Debug("Payload size: %d bytes", len(payloadBytes))
-	Debug("=== Complete Upstream Payload ===")
-	Debug("%s", string(payloadBytes))
-	Debug("=== End Upstream Payload ===")
+	p.logger.Debug("=== JetBrains API Request Debug ===")
+	p.logger.Debug("Model: %s -> %s", request.Model, internalModel)
+	p.logger.Debug("Messages processed: %d", len(messages))
+	p.logger.Debug("Tools processed: %d", len(request.Tools))
+	p.logger.Debug("Payload size: %d bytes", len(payloadBytes))
+	p.logger.Debug("=== Complete Upstream Payload ===")
+	p.logger.Debug("%s", string(payloadBytes))
+	p.logger.Debug("=== End Upstream Payload ===")
 
 	return payloadBytes, nil
 }
@@ -236,11 +238,11 @@ func (p *RequestProcessor) SendUpstreamRequest(
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
 
-	Debug("JetBrains API Response Status: %d", resp.StatusCode)
+	p.logger.Debug("JetBrains API Response Status: %d", resp.StatusCode)
 
 	// 检查配额状态
 	if resp.StatusCode == JetBrainsStatusQuotaExhausted {
-		Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
+		p.logger.Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
 		account.HasQuota = false
 		account.LastQuotaCheck = float64(time.Now().Unix())
 	}

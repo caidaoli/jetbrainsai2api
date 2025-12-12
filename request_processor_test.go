@@ -28,13 +28,26 @@ func newMockMetrics() MetricsCollector {
 	return &mockMetricsCollector{}
 }
 
+// mockLogger 测试用的 Logger 实现
+type mockLogger struct{}
+
+func (m *mockLogger) Debug(format string, args ...any) {}
+func (m *mockLogger) Info(format string, args ...any)  {}
+func (m *mockLogger) Warn(format string, args ...any)  {}
+func (m *mockLogger) Error(format string, args ...any) {}
+func (m *mockLogger) Fatal(format string, args ...any) {}
+
+func newMockLogger() Logger {
+	return &mockLogger{}
+}
+
 func init() {
 	// 初始化测试环境
 	InitializeLogger()
 }
 
 func TestRequestProcessor_ProcessMessages(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
 
 	tests := []struct {
 		name           string
@@ -97,7 +110,7 @@ func TestRequestProcessor_ProcessMessages(t *testing.T) {
 }
 
 func TestRequestProcessor_ProcessTools_NoTools(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
 
 	request := &ChatCompletionRequest{
 		Model:    "gpt-4",
@@ -121,7 +134,7 @@ func TestRequestProcessor_ProcessTools_NoTools(t *testing.T) {
 }
 
 func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
 
 	request := &ChatCompletionRequest{
 		Model:    "gpt-4",
@@ -169,7 +182,7 @@ func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
 }
 
 func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
 
 	request := &ChatCompletionRequest{
 		Model: "gpt-4",
@@ -210,7 +223,7 @@ func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
 }
 
 func TestRequestProcessor_ProcessMessages_WithImageContent(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
 
 	messages := []ChatMessage{
 		{
@@ -248,7 +261,7 @@ func TestRequestProcessor_ProcessMessages_WithImageContent(t *testing.T) {
 func TestRequestProcessor_ProcessTools_Caching(t *testing.T) {
 	// 使用新的缓存实例进行测试
 	testCache := NewCache()
-	processor := NewRequestProcessor(ModelsConfig{}, nil, testCache, newMockMetrics())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, testCache, newMockMetrics(), newMockLogger())
 
 	request := &ChatCompletionRequest{
 		Model: "gpt-4",

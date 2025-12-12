@@ -28,7 +28,7 @@ func generateShortToolCallID() string {
 // processJetbrainsStream processes the event stream from the JetBrains API.
 // It calls the provided onEvent function for each event in the stream.
 // Returns error if stream reading fails or context is cancelled.
-func processJetbrainsStream(ctx context.Context, resp *http.Response, onEvent func(event map[string]any) bool) error {
+func processJetbrainsStream(ctx context.Context, resp *http.Response, logger Logger, onEvent func(event map[string]any) bool) error {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		// 检查 context 是否已取消（客户端断开连接）
@@ -47,7 +47,7 @@ func processJetbrainsStream(ctx context.Context, resp *http.Response, onEvent fu
 		dataStr := line[6:]
 		var data map[string]any
 		if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
-			Error("Error unmarshalling stream event: %v", err)
+			logger.Error("Error unmarshalling stream event: %v", err)
 			continue
 		}
 
@@ -65,7 +65,7 @@ func processJetbrainsStream(ctx context.Context, resp *http.Response, onEvent fu
 }
 
 // handleStreamingResponseWithMetrics handles streaming responses (with injected MetricsService)
-func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
+func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService, logger Logger) {
 	setStreamingHeaders(c, APIFormatOpenAI)
 
 	streamID := ResponseIDPrefix + uuid.New().String()
@@ -75,7 +75,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
 
-	err := processJetbrainsStream(ctx, resp, func(data map[string]any) bool {
+	err := processJetbrainsStream(ctx, resp, logger, func(data map[string]any) bool {
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -108,7 +108,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 
 			respJSON, err := marshalJSON(streamResp)
 			if err != nil {
-				Warn("Failed to marshal stream response: %v", err)
+				logger.Warn("Failed to marshal stream response: %v", err)
 				return true // Continue processing next event
 			}
 			writeSSEData(c.Writer, respJSON)
@@ -127,7 +127,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 						},
 						"type": ToolTypeFunction,
 					}
-					Debug("Started new tool call with upstream ID: %s, name: %s", upstreamID, name)
+					logger.Debug("Started new tool call with upstream ID: %s, name: %s", upstreamID, name)
 				}
 			} else if currentTool != nil {
 				// 累积参数内容 (当ID为null时)
@@ -173,7 +173,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 						// Try to validate JSON format
 						var argsTest map[string]any
 						if err := sonic.Unmarshal([]byte(args), &argsTest); err != nil {
-							Warn("Tool call arguments are not valid JSON: %v", err)
+							logger.Warn("Tool call arguments are not valid JSON: %v", err)
 						}
 					}
 				}
@@ -190,7 +190,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				}
 				respJSON, err := marshalJSON(streamResp)
 				if err != nil {
-					Warn("Failed to marshal tool call response: %v", err)
+					logger.Warn("Failed to marshal tool call response: %v", err)
 					return true // Continue processing next event
 				}
 				writeSSEData(c.Writer, respJSON)
@@ -207,7 +207,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 
 			respJSON, err := marshalJSON(finalResp)
 			if err != nil {
-				Warn("Failed to marshal final response: %v", err)
+				logger.Warn("Failed to marshal final response: %v", err)
 				return false
 			}
 			writeSSEData(c.Writer, respJSON)
@@ -222,10 +222,10 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	if err != nil {
 		if ctx.Err() != nil {
 			// 客户端断开连接，记录但不报错
-			Debug("Client disconnected during streaming: %v", err)
+			logger.Debug("Client disconnected during streaming: %v", err)
 		} else {
 			// 其他流处理错误
-			Error("Stream processing error: %v", err)
+			logger.Error("Stream processing error: %v", err)
 		}
 	}
 
@@ -233,7 +233,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 }
 
 // handleNonStreamingResponseWithMetrics handles non-streaming responses (with injected MetricsService)
-func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
+func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService, logger Logger) {
 	var contentBuilder strings.Builder
 	var toolCalls []ToolCall
 	var currentFuncName string
@@ -242,7 +242,7 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
 
-	err := processJetbrainsStream(ctx, resp, func(data map[string]any) bool {
+	err := processJetbrainsStream(ctx, resp, logger, func(data map[string]any) bool {
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -268,7 +268,7 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 							},
 						})
 					}
-					Debug("Started new tool call with upstream ID: %s, name: %s", upstreamID, name)
+					logger.Debug("Started new tool call with upstream ID: %s, name: %s", upstreamID, name)
 				}
 			} else if content, ok := data["content"].(string); ok {
 				// 累积参数内容 (当ID为null时)
@@ -300,9 +300,9 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 				// 验证最后一个工具调用
 				lastToolCall := &toolCalls[len(toolCalls)-1]
 				if err := validateToolCallResponse(*lastToolCall); err != nil {
-					Warn("Invalid tool call response: %v", err)
+					logger.Warn("Invalid tool call response: %v", err)
 				}
-				Debug("Completed tool call with ID: %s, args: %s", lastToolCall.ID, lastToolCall.Function.Arguments)
+				logger.Debug("Completed tool call with ID: %s, args: %s", lastToolCall.ID, lastToolCall.Function.Arguments)
 			} else if currentFuncName != "" {
 				// 后备方案：如果没有通过ToolCall事件创建，则创建一个
 				toolCall := ToolCall{
@@ -314,7 +314,7 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 					},
 				}
 				toolCalls = append(toolCalls, toolCall)
-				Warn("Used fallback tool ID generation for: %s", currentFuncName)
+				logger.Warn("Used fallback tool ID generation for: %s", currentFuncName)
 			}
 			return false // Stop processing
 		}
@@ -324,9 +324,9 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 	// 处理流处理过程中的错误
 	if err != nil {
 		if ctx.Err() != nil {
-			Debug("Client disconnected during non-streaming response: %v", err)
+			logger.Debug("Client disconnected during non-streaming response: %v", err)
 		} else {
-			Error("Stream processing error in non-streaming handler: %v", err)
+			logger.Error("Stream processing error in non-streaming handler: %v", err)
 		}
 	}
 

@@ -188,13 +188,17 @@ func createLogger() Logger {
 // 迁移状态：
 // ✅ main.go: 已迁移至 createLogger() + 配置注入
 // ✅ server.go: 已从 ServerConfig 获取 Logger 实例
-// ⚠️  其他文件: 尚未迁移，仍使用全局日志函数
+// ✅ request_processor.go: 已通过构造函数注入 Logger
+// ✅ response_handler.go: 已通过函数参数注入 Logger
+// ✅ handlers.go: 已使用 s.config.Logger
+// ⚠️  辅助模块: 保留全局日志函数（主要是 Debug 日志，影响较小）
 //
 // 重构计划：
 // 1. [已完成] ServerConfig 添加 Logger 字段
 // 2. [已完成] main.go 使用 createLogger() 创建实例并注入
 // 3. [已完成] NewServer() 从配置获取 Logger
-// 4. [待完成] 逐步迁移其他模块使用注入的 Logger
+// 4. [已完成] 核心组件迁移（RequestProcessor, ResponseHandler）
+// 5. [低优先级] 辅助模块（anthropic_*, config, cache 等）- Debug 日志为主
 //
 // 注意：全局实例仅用于向后兼容，新代码应使用依赖注入
 
