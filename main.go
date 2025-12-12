@@ -12,32 +12,37 @@ func main() {
 		println("No .env file found, using system environment variables")
 	}
 
-	// 初始化日志系统（必须最先调用）
-	InitializeLogger()
-	Info("Logger initialized")
+	// 创建日志实例（依赖注入，不使用全局变量）
+	logger := createLogger()
+	logger.Info("Logger initialized")
 
-	// 初始化存储（MetricsService 将在 NewServer 中使用它）
-	if err := initStorageGlobal(); err != nil {
-		Fatal("Failed to initialize storage: %v", err)
+	// 创建存储实例（依赖注入，不使用全局变量）
+	storageInstance, err := initStorage()
+	if err != nil {
+		logger.Fatal("Failed to initialize storage: %v", err)
 	}
+	defer storageInstance.Close()
 
 	// 从环境变量加载服务器配置
 	config, err := loadServerConfigFromEnv()
 	if err != nil {
-		Fatal("Failed to load server configuration: %v", err)
+		logger.Fatal("Failed to load server configuration: %v", err)
 	}
 
+	// 注入依赖到配置
+	config.Storage = storageInstance
+	config.Logger = logger
+
 	// 创建服务器实例
-	// 注：MetricsService 初始化和统计数据加载现在在 NewServer 内部完成
 	server, err := NewServer(config)
 	if err != nil {
-		Fatal("Failed to create server: %v", err)
+		logger.Fatal("Failed to create server: %v", err)
 	}
 
 	// 运行服务器（包含优雅关闭）
-	Info("Starting server on port %s", config.Port)
+	logger.Info("Starting server on port %s", config.Port)
 	if err := server.Run(); err != nil {
-		Fatal("Server error: %v", err)
+		logger.Fatal("Server error: %v", err)
 	}
 }
 
@@ -96,15 +101,15 @@ func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
 	var accounts []JetbrainsAccount
 	for i := 0; i < maxLen; i++ {
 		if licenseIDs[i] != "" && authorizations[i] != "" {
-			account := JetbrainsAccount{
+			// 直接 append 以避免复制 mutex 的警告
+			accounts = append(accounts, JetbrainsAccount{
 				LicenseID:      licenseIDs[i],
 				Authorization:  authorizations[i],
 				JWT:            "",
 				LastUpdated:    0,
 				HasQuota:       true,
 				LastQuotaCheck: 0,
-			}
-			accounts = append(accounts, account)
+			})
 		}
 	}
 

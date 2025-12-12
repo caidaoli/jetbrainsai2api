@@ -127,6 +127,14 @@ const (
 	ImageFormatWebP = "image/webp"
 )
 
+// ==================== 响应体大小限制常量 ====================
+
+const (
+	// MaxResponseBodySize HTTP响应体最大大小（10MB）
+	// 用于防止恶意大响应导致的OOM攻击
+	MaxResponseBodySize = 10 * 1024 * 1024
+)
+
 // SupportedImageFormats 支持的图像格式列表
 var SupportedImageFormats = []string{ImageFormatPNG, ImageFormatJPEG, ImageFormatGIF, ImageFormatWebP}
 

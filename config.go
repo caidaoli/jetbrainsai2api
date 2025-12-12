@@ -39,6 +39,9 @@ type ServerConfig struct {
 	JetbrainsAccounts  []JetbrainsAccount // 账户列表
 	ModelsConfigPath   string
 	HTTPClientSettings HTTPClientSettings
+	StatsAuthEnabled   bool             // 是否启用统计端点认证
+	Storage            StorageInterface // 存储实例（依赖注入）
+	Logger             Logger           // 日志实例（依赖注入）
 }
 
 // HTTPClientSettings HTTP客户端配置
@@ -107,12 +110,19 @@ func loadServerConfig() ServerConfig {
 		Info("Loaded %d client API keys", len(clientAPIKeys))
 	}
 
+	// 加载统计认证配置
+	statsAuthEnabled := os.Getenv("STATS_AUTH_ENABLED") == "true"
+	if statsAuthEnabled {
+		Info("Stats authentication enabled")
+	}
+
 	return ServerConfig{
 		Port:               getEnvWithDefault("PORT", DefaultPort),
 		GinMode:            getEnvWithDefault("GIN_MODE", DefaultGinMode),
 		ClientAPIKeys:      clientAPIKeys,
 		ModelsConfigPath:   DefaultModelsConfigPath,
 		HTTPClientSettings: DefaultHTTPClientSettings(),
+		StatsAuthEnabled:   statsAuthEnabled,
 	}
 }
 
@@ -137,15 +147,15 @@ func loadJetbrainsAccounts() []JetbrainsAccount {
 	var accounts []JetbrainsAccount
 	for i := 0; i < maxLen; i++ {
 		if licenseIDs[i] != "" && authorizations[i] != "" {
-			account := JetbrainsAccount{
+			// 直接 append 以避免复制 mutex 的警告
+			accounts = append(accounts, JetbrainsAccount{
 				LicenseID:      licenseIDs[i],
 				Authorization:  authorizations[i],
 				JWT:            "",
 				LastUpdated:    0,
 				HasQuota:       true,
 				LastQuotaCheck: 0,
-			}
-			accounts = append(accounts, account)
+			})
 		}
 	}
 

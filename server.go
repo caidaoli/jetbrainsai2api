@@ -39,6 +39,9 @@ type Server struct {
 	// 请求处理器
 	requestProcessor *RequestProcessor
 
+	// 配置
+	config ServerConfig
+
 	// 优雅关闭
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -47,8 +50,15 @@ type Server struct {
 // NewServer 创建新的服务器实例
 // OCP: 通过配置开放扩展，对修改封闭
 func NewServer(config ServerConfig) (*Server, error) {
-	// 注意: InitializeLogger 已在 main.go 中调用，此处不再重复初始化
-	Info("Initializing server with %d accounts", len(config.JetbrainsAccounts))
+	// 验证配置
+	if config.Logger == nil {
+		return nil, fmt.Errorf("logger is required in ServerConfig")
+	}
+	if config.Storage == nil {
+		return nil, fmt.Errorf("storage is required in ServerConfig")
+	}
+
+	config.Logger.Info("Initializing server with %d accounts", len(config.JetbrainsAccounts))
 
 	// 创建 HTTP 客户端（必须先创建，因为 AccountManager 需要它）
 	httpClient := createOptimizedHTTPClient(config.HTTPClientSettings)
@@ -56,17 +66,17 @@ func NewServer(config ServerConfig) (*Server, error) {
 	// 创建缓存服务（消除全局变量）
 	cacheService := NewCacheService()
 
-	// 创建指标服务（消除全局变量）
+	// 创建指标服务（从配置获取 Storage 和 Logger）
 	metricsService := NewMetricsService(MetricsConfig{
 		SaveInterval: MinSaveInterval,
 		HistorySize:  HistoryBufferSize,
-		Storage:      storage, // 使用已初始化的全局 storage（将在后续版本中重构）
-		Logger:       appLogger,
+		Storage:      config.Storage, // 从配置获取
+		Logger:       config.Logger,  // 从配置获取
 	})
 
 	// 加载历史统计数据
 	if err := metricsService.LoadStats(); err != nil {
-		Warn("Failed to load historical stats: %v", err)
+		config.Logger.Warn("Failed to load historical stats: %v", err)
 	}
 
 	// 创建账户管理器（使用新的配置式构造函数）
@@ -74,8 +84,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 		Accounts:   config.JetbrainsAccounts,
 		HTTPClient: httpClient,
 		Cache:      cacheService,
-		Logger:     appLogger,
-		Metrics:    metricsService, // 注入 MetricsService
+		Logger:     config.Logger, // 从配置获取
+		Metrics:    metricsService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account manager: %w", err)
@@ -94,9 +104,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 
 	if len(validClientKeys) == 0 {
-		Warn("No client API keys configured")
+		config.Logger.Warn("No client API keys configured")
 	} else {
-		Info("Loaded %d client API keys", len(validClientKeys))
+		config.Logger.Info("Loaded %d client API keys", len(validClientKeys))
 	}
 
 	// 创建 context 用于优雅关闭
@@ -113,6 +123,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		modelsData:       modelsData,
 		modelsConfig:     modelsConfig,
 		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cacheService, metricsService),
+		config:           config,
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,
 	}
@@ -175,10 +186,23 @@ func (s *Server) setupRoutes() {
 	s.router.Use(gin.Recovery())
 	s.router.Use(s.corsMiddleware())
 
-	// 公共路由（无需认证）
-	s.router.GET("/", showStatsPage)
+	// 统计路由 - 可选认证
+	if s.config.StatsAuthEnabled {
+		// 启用认证时，统计端点需要认证
+		statsGroup := s.router.Group("/")
+		statsGroup.Use(s.authenticateClient)
+		{
+			statsGroup.GET("/", showStatsPage)
+			statsGroup.GET("/api/stats", s.getStatsData)
+		}
+	} else {
+		// 未启用认证时，统计端点公开访问
+		s.router.GET("/", showStatsPage)
+		s.router.GET("/api/stats", s.getStatsData)
+	}
+
+	// 其他公共路由（无需认证）
 	s.router.GET("/log", streamLog)
-	s.router.GET("/api/stats", s.getStatsData)
 	s.router.GET("/health", s.healthCheck)
 
 	// API 路由（需要认证）
@@ -196,7 +220,7 @@ func (s *Server) Run() error {
 	// 设置优雅关闭
 	s.setupGracefulShutdown()
 
-	Info("Starting JetBrains AI OpenAI Compatible API server on port %s", s.port)
+	s.config.Logger.Info("Starting JetBrains AI OpenAI Compatible API server on port %s", s.port)
 	return s.router.Run(":" + s.port)
 }
 
@@ -207,7 +231,7 @@ func (s *Server) setupGracefulShutdown() {
 
 	go func() {
 		<-c
-		Info("Shutdown signal received, cleaning up resources...")
+		s.config.Logger.Info("Shutdown signal received, cleaning up resources...")
 
 		// 取消 context
 		s.shutdownCancel()
@@ -215,7 +239,7 @@ func (s *Server) setupGracefulShutdown() {
 		// 关闭指标服务（内部会保存统计数据）
 		if s.metricsService != nil {
 			if err := s.metricsService.Close(); err != nil {
-				Error("Failed to close metrics service: %v", err)
+				s.config.Logger.Error("Failed to close metrics service: %v", err)
 			}
 		}
 
@@ -226,13 +250,15 @@ func (s *Server) setupGracefulShutdown() {
 
 		// 关闭账户管理器
 		if err := s.accountManager.Close(); err != nil {
-			Error("Failed to close account manager: %v", err)
+			s.config.Logger.Error("Failed to close account manager: %v", err)
 		}
 
-		// 关闭日志
-		CloseLogger()
+		// 关闭日志（如果是 AppLogger 实例）
+		if appLog, ok := s.config.Logger.(*AppLogger); ok {
+			appLog.Close()
+		}
 
-		Info("Graceful shutdown completed")
+		s.config.Logger.Info("Graceful shutdown completed")
 		os.Exit(0)
 	}()
 }

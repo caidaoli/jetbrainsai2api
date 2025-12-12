@@ -78,7 +78,7 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 		return fmt.Errorf("JWT refresh failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -194,7 +194,7 @@ func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cach
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 		// 如果是401，则JWT可能已失效，从缓存中删除
 		if resp.StatusCode == HTTPStatusUnauthorized && cache != nil {
 			cacheKey := generateQuotaCacheKey(account)

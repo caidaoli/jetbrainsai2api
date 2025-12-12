@@ -14,7 +14,6 @@ type PooledAccountManager struct {
 	accounts   []JetbrainsAccount
 	pool       chan *JetbrainsAccount
 	mu         sync.RWMutex
-	jwtRefresh sync.Mutex
 	httpClient *http.Client
 
 	// 依赖注入
@@ -50,7 +49,7 @@ func NewPooledAccountManager(config AccountManagerConfig) (*PooledAccountManager
 	}
 
 	am := &PooledAccountManager{
-		accounts:   make([]JetbrainsAccount, len(config.Accounts)),
+		accounts:   config.Accounts, // 直接使用传入的账户切片，避免复制 mutex
 		pool:       make(chan *JetbrainsAccount, len(config.Accounts)),
 		httpClient: config.HTTPClient,
 		cache:      config.Cache,
@@ -58,10 +57,7 @@ func NewPooledAccountManager(config AccountManagerConfig) (*PooledAccountManager
 		metrics:    metrics,
 	}
 
-	// 复制账户配置
-	copy(am.accounts, config.Accounts)
-
-	// 初始化账户池
+	// 初始化账户池（使用指针避免复制 mutex）
 	for i := range am.accounts {
 		am.pool <- &am.accounts[i]
 	}
@@ -77,13 +73,10 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 	triedAccounts := make(map[*JetbrainsAccount]bool)
 	totalAccounts := am.GetAccountCount()
 
-	// 最大重试次数：确保至少尝试每个账户一次
-	maxRetries := AccountAcquireMaxRetries
-	if totalAccounts > maxRetries {
-		maxRetries = totalAccounts
-	}
+	// 最大重试次数：允许每个账户尝试两次
+	maxAttempts := totalAccounts * 2
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempts := 0; attempts < maxAttempts && len(triedAccounts) < totalAccounts; attempts++ {
 		select {
 		case <-ctx.Done():
 			am.metrics.RecordAccountPoolError()
@@ -98,8 +91,6 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 					am.metrics.RecordAccountPoolError()
 					return nil, fmt.Errorf("all %d accounts have been tried and failed", totalAccounts)
 				}
-				// 不增加 attempt，继续尝试其他账户
-				attempt--
 				continue
 			}
 
@@ -186,21 +177,29 @@ func (am *PooledAccountManager) GetAvailableCount() int {
 }
 
 // RefreshJWT 刷新账户的 JWT token
-// 使用互斥锁防止并发刷新同一账户
+// 使用账户级互斥锁防止并发刷新同一账户
 func (am *PooledAccountManager) RefreshJWT(account *JetbrainsAccount) error {
-	am.jwtRefresh.Lock()
-	defer am.jwtRefresh.Unlock()
+	account.mu.Lock()
+	defer account.mu.Unlock()
 
 	// 双重检查：可能已经被其他 goroutine 刷新了
 	if account.JWT != "" && time.Now().Before(account.ExpiryTime.Add(-JWTRefreshTime)) {
 		return nil // 已经是新的了
 	}
 
-	return am.refreshJWTInternal(account)
+	return refreshJetbrainsJWT(account, am.httpClient)
 }
 
-// refreshJWTInternal 内部 JWT 刷新实现（不加锁）
+// refreshJWTInternal 内部 JWT 刷新实现（使用账户级锁）
 func (am *PooledAccountManager) refreshJWTInternal(account *JetbrainsAccount) error {
+	account.mu.Lock()
+	defer account.mu.Unlock()
+
+	// 双重检查：可能已经被其他 goroutine 刷新了
+	if account.JWT != "" && time.Now().Before(account.ExpiryTime.Add(-JWTRefreshTime)) {
+		return nil // 已经是新的了
+	}
+
 	return refreshJetbrainsJWT(account, am.httpClient)
 }
 
@@ -209,8 +208,11 @@ func (am *PooledAccountManager) CheckQuota(account *JetbrainsAccount) error {
 	return am.checkQuotaInternal(account)
 }
 
-// checkQuotaInternal 内部配额检查实现
+// checkQuotaInternal 内部配额检查实现（使用账户级锁保护状态修改）
 func (am *PooledAccountManager) checkQuotaInternal(account *JetbrainsAccount) error {
+	account.mu.Lock()
+	defer account.mu.Unlock()
+
 	// 如果最近检查过配额（1小时内），跳过检查
 	if account.LastQuotaCheck > 0 {
 		lastCheck := time.Unix(int64(account.LastQuotaCheck), 0)
@@ -237,8 +239,20 @@ func (am *PooledAccountManager) GetAllAccounts() []JetbrainsAccount {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
+	// 手动复制账户信息，跳过 mutex 字段（使用索引避免复制）
 	accounts := make([]JetbrainsAccount, len(am.accounts))
-	copy(accounts, am.accounts)
+	for i := range am.accounts {
+		accounts[i] = JetbrainsAccount{
+			LicenseID:      am.accounts[i].LicenseID,
+			Authorization:  am.accounts[i].Authorization,
+			JWT:            am.accounts[i].JWT,
+			LastUpdated:    am.accounts[i].LastUpdated,
+			HasQuota:       am.accounts[i].HasQuota,
+			LastQuotaCheck: am.accounts[i].LastQuotaCheck,
+			ExpiryTime:     am.accounts[i].ExpiryTime,
+			// mu 字段不复制，使用零值
+		}
+	}
 	return accounts
 }
 

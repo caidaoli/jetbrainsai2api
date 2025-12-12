@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -58,13 +59,14 @@ type TokenInfo struct {
 }
 
 type JetbrainsAccount struct {
-	LicenseID      string    `json:"licenseId,omitempty"`
-	Authorization  string    `json:"authorization,omitempty"`
-	JWT            string    `json:"jwt,omitempty"`
-	LastUpdated    float64   `json:"last_updated"`
-	HasQuota       bool      `json:"has_quota"`
-	LastQuotaCheck float64   `json:"last_quota_check"`
-	ExpiryTime     time.Time `json:"expiry_time"`
+	LicenseID      string     `json:"licenseId,omitempty"`
+	Authorization  string     `json:"authorization,omitempty"`
+	JWT            string     `json:"jwt,omitempty"`
+	LastUpdated    float64    `json:"last_updated"`
+	HasQuota       bool       `json:"has_quota"`
+	LastQuotaCheck float64    `json:"last_quota_check"`
+	ExpiryTime     time.Time  `json:"expiry_time"`
+	mu             sync.Mutex `json:"-"` // 账户级互斥锁，用于 JWT 刷新和配额检查
 }
 
 type ModelInfo struct {

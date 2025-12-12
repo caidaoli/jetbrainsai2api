@@ -169,7 +169,7 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 		resp.Body.Close() // 关闭原始 body，避免资源泄漏
 		errorMsg := string(body)
 		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)

@@ -86,7 +86,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 
 	// 步骤 5: 检查响应状态
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 		errorMsg := string(body)
 		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)

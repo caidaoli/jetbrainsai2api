@@ -61,7 +61,11 @@ func generateAnthropicStreamResponse(responseType string, content string, index 
 		}
 	}
 
-	data, _ := marshalJSON(resp)
+	data, err := marshalJSON(resp)
+	if err != nil {
+		Warn("Failed to marshal Anthropic stream response: %v", err)
+		return []byte{}
+	}
 	return data
 }
 

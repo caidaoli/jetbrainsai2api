@@ -159,7 +159,7 @@ func handleAnthropicNonStreamingResponseWithMetrics(c *gin.Context, resp *http.R
 	defer resp.Body.Close()
 
 	// 读取完整响应
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 	if err != nil {
 		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, http.StatusInternalServerError, AnthropicErrorAPI,

@@ -15,8 +15,8 @@ func (m *mockMetricsCollector) RecordCacheMiss()                            {}
 func (m *mockMetricsCollector) RecordToolValidation(duration time.Duration) {}
 func (m *mockMetricsCollector) RecordRequest(success bool, responseTime int64, model, account string) {
 }
-func (m *mockMetricsCollector) RecordHTTPRequest(duration time.Duration) {}
-func (m *mockMetricsCollector) RecordHTTPError()                         {}
+func (m *mockMetricsCollector) RecordHTTPRequest(duration time.Duration)     {}
+func (m *mockMetricsCollector) RecordHTTPError()                             {}
 func (m *mockMetricsCollector) RecordAccountPoolWait(duration time.Duration) {}
 func (m *mockMetricsCollector) RecordAccountPoolError()                      {}
 func (m *mockMetricsCollector) UpdateSystemMetrics()                         {}

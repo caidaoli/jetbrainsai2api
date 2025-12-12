@@ -106,7 +106,11 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				Choices: []StreamChoice{{Delta: deltaPayload}},
 			}
 
-			respJSON, _ := marshalJSON(streamResp)
+			respJSON, err := marshalJSON(streamResp)
+			if err != nil {
+				Warn("Failed to marshal stream response: %v", err)
+				return true // Continue processing next event
+			}
 			writeSSEData(c.Writer, respJSON)
 			c.Writer.Flush()
 		case JetBrainsEventTypeToolCall:
@@ -184,7 +188,11 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 					Model:   request.Model,
 					Choices: []StreamChoice{{Delta: deltaPayload}},
 				}
-				respJSON, _ := marshalJSON(streamResp)
+				respJSON, err := marshalJSON(streamResp)
+				if err != nil {
+					Warn("Failed to marshal tool call response: %v", err)
+					return true // Continue processing next event
+				}
 				writeSSEData(c.Writer, respJSON)
 				c.Writer.Flush()
 			}
@@ -197,7 +205,11 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				Choices: []StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(FinishReasonToolCalls)}},
 			}
 
-			respJSON, _ := marshalJSON(finalResp)
+			respJSON, err := marshalJSON(finalResp)
+			if err != nil {
+				Warn("Failed to marshal final response: %v", err)
+				return false
+			}
 			writeSSEData(c.Writer, respJSON)
 			writeSSEDone(c.Writer)
 			c.Writer.Flush()

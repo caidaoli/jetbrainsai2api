@@ -35,6 +35,10 @@ type CacheItem struct {
 // deepCopyValue 使用 JSON 序列化实现深拷贝
 // 用于防止缓存数据被外部修改（TOCTOU 竞态条件）
 // 注意：仅适用于可 JSON 序列化的类型
+//
+// 性能警告：深拷贝通过 JSON 序列化/反序列化实现，每次调用会消耗 CPU
+// 对于不可变的只读数据（如消息缓存、工具缓存），应避免深拷贝，直接返回指针
+// 只对可能被修改的数据（如配额缓存）使用深拷贝
 func deepCopyValue(src any) (any, error) {
 	if src == nil {
 		return nil, nil
@@ -192,7 +196,6 @@ func (c *LRUCache) cleanupExpired() {
 	}
 }
 
-
 // Clear 清空所有缓存项
 func (c *LRUCache) Clear() {
 	c.mu.Lock()
@@ -232,14 +235,9 @@ func (cs *CacheService) GetMessageCache(key string) (any, bool) {
 		return nil, false
 	}
 
-	// 深拷贝：防止返回的数据被外部修改
-	copied, err := deepCopyValue(cached)
-	if err != nil {
-		Warn("Deep copy failed for message cache key %s: %v", key[:min(16, len(key))], err)
-		return cached, true
-	}
-
-	return copied, true
+	// 性能优化：消息数据是只读的，不需要深拷贝
+	// 消息在被缓存后不会被修改，直接返回指针即可
+	return cached, true
 }
 
 // SetMessageCache 设置消息转换缓存
@@ -262,14 +260,9 @@ func (cs *CacheService) GetToolCache(key string) (any, bool) {
 		return nil, false
 	}
 
-	// 深拷贝：防止返回的数据被外部修改
-	copied, err := deepCopyValue(cached)
-	if err != nil {
-		Warn("Deep copy failed for tool cache key %s: %v", key[:min(16, len(key))], err)
-		return cached, true
-	}
-
-	return copied, true
+	// 性能优化：工具数据是只读的，不需要深拷贝
+	// 工具在被缓存后不会被修改，直接返回指针即可
+	return cached, true
 }
 
 // SetToolCache 设置工具验证缓存
@@ -286,6 +279,7 @@ func (cs *CacheService) SetToolCache(key string, value any, duration time.Durati
 }
 
 // GetQuotaCache 获取配额缓存 (修复 TOCTOU 竞态条件 - 返回深拷贝)
+// 注意：配额数据需要深拷贝，因为可能被外部修改（如更新 HasQuota 字段）
 func (cs *CacheService) GetQuotaCache(key string) (*JetbrainsQuotaResponse, bool) {
 	cached, found := cs.quota.Get(key)
 	if !found {
@@ -293,6 +287,7 @@ func (cs *CacheService) GetQuotaCache(key string) (*JetbrainsQuotaResponse, bool
 	}
 
 	// 深拷贝：防止返回的数据被外部修改
+	// 配额数据不是只读的，可能在账户检查时被修改，必须使用深拷贝
 	quotaData, ok := cached.(*JetbrainsQuotaResponse)
 	if !ok {
 		return nil, false
@@ -368,7 +363,6 @@ func (cs *CacheService) DeleteQuotaCache(key string) {
 func (cs *CacheService) ClearQuotaCache() {
 	cs.quota.Clear()
 }
-
 
 // ClearMessageCache 清空所有消息转换缓存
 func (cs *CacheService) ClearMessageCache() {
@@ -503,7 +497,12 @@ func generateToolsCacheKey(tools []Tool) string {
 // 包含版本号前缀，避免格式变更导致的缓存污染
 func generateParamsCacheKey(params map[string]any) string {
 	// 使用 Sonic 快速序列化
-	data, _ := marshalJSON(params)
+	data, err := marshalJSON(params)
+	if err != nil {
+		Warn("Failed to marshal params for cache key: %v", err)
+		// 降级：使用空数据生成缓存键，避免缓存污染
+		data = []byte("{}")
+	}
 	hash := sha1.Sum(data)
 	return fmt.Sprintf("params:%s:%s", CacheKeyVersion, hex.EncodeToString(hash[:]))
 }
