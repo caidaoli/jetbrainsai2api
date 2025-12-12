@@ -12,15 +12,18 @@ import (
 func TestPooledAccountManager_BasicAcquireRelease(t *testing.T) {
 	accounts := []JetbrainsAccount{
 		{
-			JWT:             "test-jwt-1",
-			HasQuota:        true,
-			ExpiryTime:      time.Now().Add(24 * time.Hour),
-			LastQuotaCheck:  float64(time.Now().Unix()), // 设置最近检查时间，避免真实API调用
-			LicenseID:       "test-license-1",           // 设置LicenseID避免JWT刷新
+			JWT:            "test-jwt-1",
+			HasQuota:       true,
+			ExpiryTime:     time.Now().Add(24 * time.Hour),
+			LastQuotaCheck: float64(time.Now().Unix()), // 设置最近检查时间，避免真实API调用
+			LicenseID:      "test-license-1",           // 设置LicenseID避免JWT刷新
 		},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
@@ -61,7 +64,10 @@ func TestPooledAccountManager_ConcurrentAcquire(t *testing.T) {
 		{JWT: "test-jwt-2", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-2"},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
@@ -111,7 +117,10 @@ func TestPooledAccountManager_AcquireTimeout(t *testing.T) {
 		{JWT: "test-jwt-1", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-1"},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
@@ -151,7 +160,10 @@ func TestPooledAccountManager_ContextCancellation(t *testing.T) {
 		{JWT: "test-jwt-1", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-1"},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
@@ -190,7 +202,10 @@ func TestPooledAccountManager_ReleaseNil(t *testing.T) {
 		{JWT: "test-jwt-1", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-1"},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
@@ -214,7 +229,10 @@ func TestPooledAccountManager_GetAccountCount(t *testing.T) {
 		{JWT: "test-jwt-3", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-3"},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
@@ -251,7 +269,10 @@ func TestPooledAccountManager_GetAccountCount(t *testing.T) {
 
 // TestPooledAccountManager_NoAccounts 测试没有账户的情况
 func TestPooledAccountManager_NoAccounts(t *testing.T) {
-	_, err := NewPooledAccountManager([]JetbrainsAccount{}, &http.Client{})
+	_, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   []JetbrainsAccount{},
+		HTTPClient: &http.Client{},
+	})
 	if err == nil {
 		t.Error("Expected error when creating manager with no accounts")
 	}
@@ -265,7 +286,10 @@ func TestPooledAccountManager_GetAllAccounts(t *testing.T) {
 		{JWT: "test-jwt-2", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-2"},
 	}
 
-	am, err := NewPooledAccountManager(accounts, &http.Client{})
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}

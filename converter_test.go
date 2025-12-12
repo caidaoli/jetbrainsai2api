@@ -7,18 +7,18 @@ import (
 func TestOpenAIToJetbrainsMessages_MultipleTextContent(t *testing.T) {
 	messages := []ChatMessage{
 		{
-			Role: "user",
+			Role: RoleUser,
 			Content: []any{
 				map[string]any{
-					"type": "text",
+					"type": ContentBlockTypeText,
 					"text": "第一条消息内容",
 				},
 				map[string]any{
-					"type": "text",
+					"type": ContentBlockTypeText,
 					"text": "第二条消息内容",
 				},
 				map[string]any{
-					"type": "text",
+					"type": ContentBlockTypeText,
 					"text": "第三条消息内容",
 				},
 			},
@@ -35,8 +35,8 @@ func TestOpenAIToJetbrainsMessages_MultipleTextContent(t *testing.T) {
 
 	// 验证每个消息都是user_message类型
 	for i, msg := range result {
-		if msg.Type != "user_message" {
-			t.Errorf("消息 %d 类型错误，期望 'user_message'，实际 '%s'", i, msg.Type)
+		if msg.Type != JetBrainsMessageTypeUser {
+			t.Errorf("消息 %d 类型错误，期望 '%s'，实际 '%s'", i, JetBrainsMessageTypeUser, msg.Type)
 		}
 	}
 
@@ -52,7 +52,7 @@ func TestOpenAIToJetbrainsMessages_MultipleTextContent(t *testing.T) {
 func TestOpenAIToJetbrainsMessages_SingleTextContent(t *testing.T) {
 	messages := []ChatMessage{
 		{
-			Role:    "user",
+			Role:    RoleUser,
 			Content: "单一文本消息",
 		},
 	}
@@ -63,8 +63,8 @@ func TestOpenAIToJetbrainsMessages_SingleTextContent(t *testing.T) {
 		t.Errorf("期望生成 1 个消息，实际生成 %d 个", len(result))
 	}
 
-	if result[0].Type != "user_message" {
-		t.Errorf("消息类型错误，期望 'user_message'，实际 '%s'", result[0].Type)
+	if result[0].Type != JetBrainsMessageTypeUser {
+		t.Errorf("消息类型错误，期望 '%s'，实际 '%s'", JetBrainsMessageTypeUser, result[0].Type)
 	}
 
 	if result[0].Content != "单一文本消息" {

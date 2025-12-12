@@ -12,25 +12,31 @@ const (
 	statsRedisKey = "jetbrainsai2api:stats"
 )
 
-// StorageInterface defines the interface for persistent storage
-type StorageInterface interface {
-	SaveStats(stats *RequestStats) error
-	LoadStats() (*RequestStats, error)
+// FileStorage implements persistence using JSON files
+type FileStorage struct {
+	filePath string
 }
 
-// FileStorage implements persistence using JSON files
-type FileStorage struct{}
+// NewFileStorage 创建新的文件存储
+func NewFileStorage(filePath string) *FileStorage {
+	if filePath == "" {
+		filePath = StatsFilePath
+	}
+	return &FileStorage{
+		filePath: filePath,
+	}
+}
 
 func (fs *FileStorage) SaveStats(stats *RequestStats) error {
 	data, err := sonic.MarshalIndent(stats, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(statsFilePath, data, 0644)
+	return os.WriteFile(fs.filePath, data, FilePermissionReadWrite)
 }
 
 func (fs *FileStorage) LoadStats() (*RequestStats, error) {
-	data, err := os.ReadFile(statsFilePath)
+	data, err := os.ReadFile(fs.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Return empty stats if file doesn't exist
@@ -54,14 +60,25 @@ func (fs *FileStorage) LoadStats() (*RequestStats, error) {
 	return &stats, nil
 }
 
+func (fs *FileStorage) Close() error {
+	return nil // File storage doesn't need cleanup
+}
+
 // RedisStorage implements persistence using Redis
 type RedisStorage struct {
 	client *redis.Client
 	ctx    context.Context
+	key    string
 }
 
-func NewRedisStorage(redisURL string) (*RedisStorage, error) {
-	opts, err := redis.ParseURL(redisURL)
+// RedisStorageConfig Redis 存储配置
+type RedisStorageConfig struct {
+	URL string
+	Key string
+}
+
+func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
+	opts, err := redis.ParseURL(config.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +92,16 @@ func NewRedisStorage(redisURL string) (*RedisStorage, error) {
 		return nil, err
 	}
 
+	key := config.Key
+	if key == "" {
+		key = statsRedisKey
+	}
+
 	Info("Successfully connected to Redis")
 	return &RedisStorage{
 		client: client,
 		ctx:    ctx,
+		key:    key,
 	}, nil
 }
 
@@ -88,11 +111,11 @@ func (rs *RedisStorage) SaveStats(stats *RequestStats) error {
 		return err
 	}
 
-	return rs.client.Set(rs.ctx, statsRedisKey, data, 0).Err()
+	return rs.client.Set(rs.ctx, rs.key, data, 0).Err()
 }
 
 func (rs *RedisStorage) LoadStats() (*RequestStats, error) {
-	val, err := rs.client.Get(rs.ctx, statsRedisKey).Result()
+	val, err := rs.client.Get(rs.ctx, rs.key).Result()
 	if err != nil {
 		if err == redis.Nil {
 			// Return empty stats if key doesn't exist
@@ -120,30 +143,37 @@ func (rs *RedisStorage) Close() error {
 	return rs.client.Close()
 }
 
-// Global storage instance
-var storage StorageInterface
-
-// initStorage initializes the storage based on environment configuration
-func initStorage() error {
+// initStorage 初始化存储（返回 StorageInterface，不使用全局变量）
+func initStorage() (StorageInterface, error) {
 	redisURL := os.Getenv("REDIS_URL")
 
 	if redisURL != "" {
 		// Use Redis storage
-		redisStorage, err := NewRedisStorage(redisURL)
+		redisStorage, err := NewRedisStorage(RedisStorageConfig{
+			URL: redisURL,
+			Key: statsRedisKey,
+		})
 		if err != nil {
 			Error("Failed to initialize Redis storage: %v, falling back to file storage", err)
-			storage = &FileStorage{}
-		} else {
-			storage = redisStorage
-			Info("Using Redis storage")
+			return NewFileStorage(StatsFilePath), nil
 		}
-	} else {
-		// Use file storage
-		storage = &FileStorage{}
-		Info("Using file storage")
+		Info("Using Redis storage")
+		return redisStorage, nil
 	}
 
-	return nil
+	// Use file storage
+	Info("Using file storage")
+	return NewFileStorage(StatsFilePath), nil
+}
+
+// 全局变量（向后兼容，逐步迁移到依赖注入）
+var storage StorageInterface
+
+// initStorageGlobal 初始化全局存储（向后兼容）
+func initStorageGlobal() error {
+	var err error
+	storage, err = initStorage()
+	return err
 }
 
 // saveStatsWithStorage saves stats using the configured storage

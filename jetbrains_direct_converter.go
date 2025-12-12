@@ -25,13 +25,13 @@ func parseJetbrainsToAnthropicDirect(body []byte, model string) (*AnthropicMessa
 
 	// 直接构建 Anthropic 响应
 	var content []AnthropicContentBlock
-	var stopReason string = "end_turn"
+	var stopReason string = StopReasonEndTurn
 
 	// 提取文本内容
 	if contentField, exists := jetbrainsResp["content"]; exists {
 		if contentStr, ok := contentField.(string); ok && contentStr != "" {
 			content = append(content, AnthropicContentBlock{
-				Type: "text",
+				Type: ContentBlockTypeText,
 				Text: contentStr,
 			})
 		}
@@ -39,8 +39,8 @@ func parseJetbrainsToAnthropicDirect(body []byte, model string) (*AnthropicMessa
 
 	response := &AnthropicMessagesResponse{
 		ID:         generateMessageID(),
-		Type:       "message",
-		Role:       "assistant",
+		Type:       AnthropicTypeMessage,
+		Role:       RoleAssistant,
 		Content:    content,
 		Model:      model,
 		StopReason: stopReason,
@@ -63,16 +63,16 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 	var content []AnthropicContentBlock
 	var currentToolCall *AnthropicContentBlock
 	var textParts []string
-	var finishReason string = "end_turn"
+	var finishReason string = StopReasonEndTurn
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || line == "data: end" {
+		if line == "" || line == StreamEndLine {
 			continue
 		}
 
-		if strings.HasPrefix(line, "data: ") {
-			jsonData := strings.TrimPrefix(line, "data: ")
+		if strings.HasPrefix(line, StreamChunkPrefix) {
+			jsonData := strings.TrimPrefix(line, StreamChunkPrefix)
 			var streamData map[string]any
 			if err := sonic.Unmarshal([]byte(jsonData), &streamData); err != nil {
 				Debug("Failed to parse stream JSON: %v", err)
@@ -81,18 +81,18 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 
 			eventType, _ := streamData["type"].(string)
 			switch eventType {
-			case "Content":
+			case JetBrainsEventTypeContent:
 				// 文本内容
 				if text, ok := streamData["content"].(string); ok {
 					textParts = append(textParts, text)
 				}
-			case "ToolCall":
+			case JetBrainsEventTypeToolCall:
 				// 工具调用处理
 				if upstreamID, ok := streamData["id"].(string); ok && upstreamID != "" {
 					// 开始新的工具调用
 					if name, ok := streamData["name"].(string); ok && name != "" {
 						currentToolCall = &AnthropicContentBlock{
-							Type:  "tool_use",
+							Type:  ContentBlockTypeToolUse,
 							ID:    upstreamID,
 							Name:  name,
 							Input: make(map[string]any),
@@ -114,7 +114,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 						}
 					}
 				}
-			case "FinishMetadata":
+			case JetBrainsEventTypeFinishMetadata:
 				// 完成处理
 				if reasonStr, ok := streamData["reason"].(string); ok {
 					finishReason = mapJetbrainsFinishReason(reasonStr)
@@ -145,7 +145,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 		fullText := strings.Join(textParts, "")
 		if fullText != "" {
 			textContent := AnthropicContentBlock{
-				Type: "text",
+				Type: ContentBlockTypeText,
 				Text: fullText,
 			}
 			// 将文本内容放在工具调用之前
@@ -155,8 +155,8 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 
 	response := &AnthropicMessagesResponse{
 		ID:         generateMessageID(),
-		Type:       "message",
-		Role:       "assistant",
+		Type:       AnthropicTypeMessage,
+		Role:       RoleAssistant,
 		Content:    content,
 		Model:      model,
 		StopReason: finishReason,
@@ -176,14 +176,14 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 // KISS: 简单的映射逻辑
 func mapJetbrainsFinishReason(jetbrainsReason string) string {
 	switch jetbrainsReason {
-	case "tool_call":
-		return "tool_use"
-	case "length":
-		return "max_tokens"
-	case "stop":
-		return "end_turn"
+	case JetBrainsFinishReasonToolCall:
+		return StopReasonToolUse
+	case JetBrainsFinishReasonLength:
+		return StopReasonMaxTokens
+	case JetBrainsFinishReasonStop:
+		return StopReasonEndTurn
 	default:
-		return "end_turn"
+		return StopReasonEndTurn
 	}
 }
 
@@ -192,7 +192,7 @@ func mapJetbrainsFinishReason(jetbrainsReason string) string {
 func getContentText(content []AnthropicContentBlock) string {
 	var textParts []string
 	for _, block := range content {
-		if block.Type == "text" && block.Text != "" {
+		if block.Type == ContentBlockTypeText && block.Text != "" {
 			textParts = append(textParts, block.Text)
 		}
 	}

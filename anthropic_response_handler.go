@@ -18,20 +18,17 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 	defer resp.Body.Close()
 
 	// 设置 Anthropic 流式响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
+	setStreamingHeaders(c, APIFormatAnthropic)
 
 	// 发送 message_start 事件
-	messageStartData := generateAnthropicStreamResponse("message_start", "", 0)
-	c.Writer.Write([]byte("event: message_start\n"))
+	messageStartData := generateAnthropicStreamResponse(StreamEventTypeMessageStart, "", 0)
+	c.Writer.Write([]byte(AnthropicEventMessageStart))
 	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(messageStartData))))
 	c.Writer.Flush()
 
 	// 发送 content_block_start 事件
-	contentBlockStartData := generateAnthropicStreamResponse("content_block_start", "", 0)
-	c.Writer.Write([]byte("event: content_block_start\n"))
+	contentBlockStartData := generateAnthropicStreamResponse(StreamEventTypeContentBlockStart, "", 0)
+	c.Writer.Write([]byte(AnthropicEventContentBlockStart))
 	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(contentBlockStartData))))
 	c.Writer.Flush()
 
@@ -57,15 +54,15 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 		}
 
 		// 处理 SSE 格式 (KISS: 简单的行解析)
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
+		if strings.HasPrefix(line, StreamChunkPrefix) {
+			data := strings.TrimPrefix(line, StreamChunkPrefix)
 			Debug("Line %d: SSE data = '%s'", lineCount, data)
 
-			if data == "[DONE]" {
+			if data == StreamChunkDoneMessage {
 				Debug("Line %d: Found [DONE], breaking", lineCount)
 				break
 			}
-			if data == "end" {
+			if data == StreamEndMarker {
 				Debug("Line %d: Found 'end', breaking", lineCount)
 				break
 			}
@@ -84,7 +81,7 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 				fullContent.WriteString(content)
 
 				// 发送 content_block_delta 事件 (Anthropic 格式)
-				contentBlockDeltaData := generateAnthropicStreamResponse("content_block_delta", content, 0)
+				contentBlockDeltaData := generateAnthropicStreamResponse(StreamEventTypeContentBlockDelta, content, 0)
 
 				// 检查连接状态
 				select {
@@ -95,14 +92,14 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 					// 连接正常，继续发送
 				}
 
-				bytesWritten, err := c.Writer.Write([]byte("event: content_block_delta\n"))
+				bytesWritten, err := c.Writer.Write([]byte(AnthropicEventContentBlockDelta))
 				if err != nil {
 					Debug("Line %d: Failed to write event header: %v", lineCount, err)
 					return
 				}
 				Debug("Line %d: Wrote event header, %d bytes", lineCount, bytesWritten)
 
-				dataLine := fmt.Sprintf("data: %s\n\n", string(contentBlockDeltaData))
+				dataLine := fmt.Sprintf("%s%s\n\n", StreamChunkPrefix, string(contentBlockDeltaData))
 				bytesWritten, err = c.Writer.Write([]byte(dataLine))
 				if err != nil {
 					Debug("Line %d: Failed to write data: %v", lineCount, err)
@@ -129,15 +126,15 @@ func handleAnthropicStreamingResponse(c *gin.Context, resp *http.Response, anthR
 	Debug("===================================")
 
 	// 发送 content_block_stop 事件
-	contentBlockStopData := generateAnthropicStreamResponse("content_block_stop", "", 0)
-	c.Writer.Write([]byte("event: content_block_stop\n"))
-	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(contentBlockStopData))))
+	contentBlockStopData := generateAnthropicStreamResponse(StreamEventTypeContentBlockStop, "", 0)
+	c.Writer.Write([]byte(AnthropicEventContentBlockStop))
+	c.Writer.Write([]byte(fmt.Sprintf("%s%s\n\n", StreamChunkPrefix, string(contentBlockStopData))))
 	c.Writer.Flush()
 
 	// 发送 message_stop 事件
-	messageStopData := generateAnthropicStreamResponse("message_stop", "", 0)
-	c.Writer.Write([]byte("event: message_stop\n"))
-	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(messageStopData))))
+	messageStopData := generateAnthropicStreamResponse(StreamEventTypeMessageStop, "", 0)
+	c.Writer.Write([]byte(AnthropicEventMessageStop))
+	c.Writer.Write([]byte(fmt.Sprintf("%s%s\n\n", StreamChunkPrefix, string(messageStopData))))
 	c.Writer.Flush()
 
 	if hasContent {
@@ -158,7 +155,7 @@ func handleAnthropicNonStreamingResponse(c *gin.Context, resp *http.Response, an
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		recordFailureWithTimer(startTime, anthReq.Model, accountIdentifier)
-		respondWithAnthropicError(c, http.StatusInternalServerError, "api_error",
+		respondWithAnthropicError(c, http.StatusInternalServerError, AnthropicErrorAPI,
 			"Failed to read response body")
 		return
 	}
@@ -169,7 +166,7 @@ func handleAnthropicNonStreamingResponse(c *gin.Context, resp *http.Response, an
 	anthResp, err := parseJetbrainsToAnthropicDirect(body, anthReq.Model)
 	if err != nil {
 		recordFailureWithTimer(startTime, anthReq.Model, accountIdentifier)
-		respondWithAnthropicError(c, http.StatusInternalServerError, "api_error",
+		respondWithAnthropicError(c, http.StatusInternalServerError, AnthropicErrorAPI,
 			fmt.Sprintf("Failed to parse response: %v", err))
 		return
 	}
@@ -183,7 +180,7 @@ func handleAnthropicNonStreamingResponse(c *gin.Context, resp *http.Response, an
 // parseJetbrainsStreamData 解析 JetBrains 流式数据
 // KISS: 保持简单的解析逻辑
 func parseJetbrainsStreamData(data string) (string, error) {
-	if data == "" || data == "null" {
+	if data == "" || data == StreamNullValue {
 		return "", nil
 	}
 
@@ -195,7 +192,7 @@ func parseJetbrainsStreamData(data string) (string, error) {
 	}
 
 	// 提取内容：优先处理 JetBrains API 格式
-	if eventType, ok := streamData["type"].(string); ok && eventType == "Content" {
+	if eventType, ok := streamData["type"].(string); ok && eventType == JetBrainsEventTypeContent {
 		if content, ok := streamData["content"].(string); ok {
 			return content, nil
 		}
@@ -256,17 +253,17 @@ func parseJetbrainsNonStreamResponse(body []byte, model string) (*ChatCompletion
 	// 构建 OpenAI 格式响应 (DRY: 复用响应构建逻辑)
 	openAIResp := &ChatCompletionResponse{
 		ID:      generateResponseID(),
-		Object:  "chat.completion",
+		Object:  ChatCompletionObjectType,
 		Created: time.Now().Unix(),
 		Model:   model,
 		Choices: []ChatCompletionChoice{
 			{
 				Message: ChatMessage{
-					Role:    "assistant",
+					Role:    RoleAssistant,
 					Content: content,
 				},
 				Index:        0,
-				FinishReason: "stop",
+				FinishReason: FinishReasonStop,
 			},
 		},
 		Usage: map[string]int{
@@ -281,7 +278,7 @@ func parseJetbrainsNonStreamResponse(body []byte, model string) (*ChatCompletion
 
 // generateResponseID 生成响应 ID (KISS: 简单的 ID 生成)
 func generateResponseID() string {
-	return fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+	return fmt.Sprintf("%s%d", ResponseIDPrefix, time.Now().UnixNano())
 }
 
 // estimateTokenCount 估算 token 数量 (KISS: 简单估算)
@@ -292,15 +289,15 @@ func estimateTokenCount(text string) int {
 
 // createJetbrainsStreamRequest 创建 JetBrains API 流式请求 (DRY: 提取公共逻辑)
 func createJetbrainsStreamRequest(payloadBytes []byte, jwt string) (*http.Request, error) {
-	req, err := http.NewRequest("POST", "https://api.jetbrains.ai/user/v5/llm/chat/stream/v8",
+	req, err := http.NewRequest(http.MethodPost, JetBrainsChatEndpoint,
 		strings.NewReader(string(payloadBytes)))
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set(HeaderAccept, ContentTypeEventStream)
+	req.Header.Set(HeaderContentType, ContentTypeJSON)
+	req.Header.Set(HeaderCacheControl, CacheControlNoCache)
 	setJetbrainsHeaders(req, jwt)
 
 	return req, nil
@@ -317,13 +314,13 @@ func parseAndAggregateStreamResponse(bodyStr, model string) (*ChatCompletionResp
 		line = strings.TrimSpace(line)
 
 		// 跳过空行和结束标记
-		if line == "" || line == "data: end" {
+		if line == "" || line == StreamEndLine {
 			continue
 		}
 
 		// 处理 "data: " 前缀的行
-		if strings.HasPrefix(line, "data: ") {
-			jsonData := strings.TrimPrefix(line, "data: ")
+		if strings.HasPrefix(line, StreamChunkPrefix) {
+			jsonData := strings.TrimPrefix(line, StreamChunkPrefix)
 
 			// 解析 JSON 数据
 			var streamData map[string]any
@@ -336,12 +333,12 @@ func parseAndAggregateStreamResponse(bodyStr, model string) (*ChatCompletionResp
 			eventType, _ := streamData["type"].(string)
 
 			switch eventType {
-			case "Content":
+			case JetBrainsEventTypeContent:
 				// 提取内容片段
 				if content, ok := streamData["content"].(string); ok {
 					contentParts = append(contentParts, content)
 				}
-			case "FinishMetadata":
+			case JetBrainsEventTypeFinishMetadata:
 				// 提取结束原因
 				if reason, ok := streamData["reason"].(string); ok {
 					finishReason = reason
@@ -354,20 +351,20 @@ func parseAndAggregateStreamResponse(bodyStr, model string) (*ChatCompletionResp
 	fullContent := strings.Join(contentParts, "")
 
 	if finishReason == "" {
-		finishReason = "stop" // 默认结束原因
+		finishReason = FinishReasonStop // 默认结束原因
 	}
 
 	// 构建完整的 OpenAI 格式响应
 	response := &ChatCompletionResponse{
 		ID:      generateResponseID(),
-		Object:  "chat.completion",
+		Object:  ChatCompletionObjectType,
 		Created: time.Now().Unix(),
 		Model:   model,
 		Choices: []ChatCompletionChoice{
 			{
 				Index: 0,
 				Message: ChatMessage{
-					Role:    "assistant",
+					Role:    RoleAssistant,
 					Content: fullContent,
 				},
 				FinishReason: finishReason,

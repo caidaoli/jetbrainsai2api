@@ -15,8 +15,8 @@ type ImageValidator struct {
 // NewImageValidator creates a new image validator with default settings
 func NewImageValidator() *ImageValidator {
 	return &ImageValidator{
-		MaxSizeBytes:     10 * 1024 * 1024, // 10MB
-		SupportedFormats: []string{"image/png", "image/jpeg", "image/gif", "image/webp"},
+		MaxSizeBytes:     MaxImageSizeBytes,
+		SupportedFormats: SupportedImageFormats,
 	}
 }
 

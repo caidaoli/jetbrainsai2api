@@ -10,7 +10,7 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 	validator := NewImageValidator()
 
 	for _, msg := range messages {
-		if msg.Role == "assistant" && msg.ToolCalls != nil {
+		if msg.Role == RoleAssistant && msg.ToolCalls != nil {
 			for _, tc := range msg.ToolCalls {
 				if tc.ID != "" && tc.Function.Name != "" {
 					toolIDToFuncNameMap[tc.ID] = tc.Function.Name
@@ -22,7 +22,7 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 	var jetbrainsMessages []JetbrainsMessage
 	for _, msg := range messages {
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			// Check for image content in user messages
 			mediaType, imageData, hasImage := ExtractImageDataFromContent(msg.Content)
 			if hasImage {
@@ -32,13 +32,13 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 					// Continue with text content only if image validation fails
 					textContent := extractTextContent(msg.Content)
 					jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-						Type:    "user_message",
+						Type:    JetBrainsMessageTypeUser,
 						Content: textContent,
 					})
 				} else {
 					// Add image message for v8 API
 					jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-						Type:      "media_message",
+						Type:      JetBrainsMessageTypeMedia,
 						MediaType: mediaType,
 						Data:      imageData,
 					})
@@ -47,7 +47,7 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 					textContent := extractTextContent(msg.Content)
 					if textContent != "" {
 						jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-							Type:    "user_message",
+							Type:    JetBrainsMessageTypeUser,
 							Content: textContent,
 						})
 					}
@@ -57,10 +57,10 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 				if contentArray, ok := msg.Content.([]any); ok {
 					for _, item := range contentArray {
 						if itemMap, ok := item.(map[string]any); ok {
-							if itemType, ok := itemMap["type"].(string); ok && itemType == "text" {
+							if itemType, ok := itemMap["type"].(string); ok && itemType == ContentBlockTypeText {
 								if text, ok := itemMap["text"].(string); ok && text != "" {
 									jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-										Type:    "user_message",
+										Type:    JetBrainsMessageTypeUser,
 										Content: text,
 									})
 								}
@@ -71,18 +71,18 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 					// Single text content
 					textContent := extractTextContent(msg.Content)
 					jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-						Type:    "user_message",
+						Type:    JetBrainsMessageTypeUser,
 						Content: textContent,
 					})
 				}
 			}
-		case "system":
+		case RoleSystem:
 			textContent := extractTextContent(msg.Content)
 			jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-				Type:    "system_message",
+				Type:    JetBrainsMessageTypeSystem,
 				Content: textContent,
 			})
-		case "assistant":
+		case RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				// V8 API: Use assistant_message_tool for tool calls
 				toolCall := msg.ToolCalls[0]
@@ -96,7 +96,7 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 				}
 
 				jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-					Type:     "assistant_message_tool",
+					Type:     JetBrainsMessageTypeAssistantTool,
 					ID:       toolCall.ID,
 					ToolName: toolCall.Function.Name,
 					Content:  toolCall.Function.Arguments,
@@ -105,17 +105,17 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 				// V8 API: Use assistant_message_text for text responses
 				textContent := extractTextContent(msg.Content)
 				jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-					Type:    "assistant_message_text",
+					Type:    JetBrainsMessageTypeAssistantText,
 					Content: textContent,
 				})
 			}
-		case "tool":
+		case RoleTool:
 			functionName := toolIDToFuncNameMap[msg.ToolCallID]
 			if functionName != "" {
 				// V8 API: Use tool_message for tool results
 				textContent := extractTextContent(msg.Content)
 				jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-					Type:     "tool_message",
+					Type:     JetBrainsMessageTypeTool,
 					ID:       msg.ToolCallID,
 					ToolName: functionName,
 					Result:   textContent,
@@ -126,7 +126,7 @@ func openAIToJetbrainsMessages(messages []ChatMessage) []JetbrainsMessage {
 		default:
 			textContent := extractTextContent(msg.Content)
 			jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-				Type:    "user_message",
+				Type:    JetBrainsMessageTypeUser,
 				Content: textContent,
 			})
 		}

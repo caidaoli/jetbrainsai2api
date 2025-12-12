@@ -21,12 +21,6 @@ type JetbrainsQuotaResponse struct {
 	Until string `json:"until"`
 }
 
-// CachedQuotaInfo defines the structure for cached quota information
-type CachedQuotaInfo struct {
-	QuotaData  *JetbrainsQuotaResponse
-	LastAccess time.Time
-}
-
 // Data structures
 type RequestStats struct {
 	TotalRequests      int64           `json:"total_requests"`
@@ -262,7 +256,7 @@ func (fs *FlexibleString) UnmarshalJSON(data []byte) error {
 				if text, ok := textVal.(string); ok {
 					parts = append(parts, text)
 				}
-			} else if typeVal, ok := item["type"]; ok && typeVal == "text" {
+			} else if typeVal, ok := item["type"]; ok && typeVal == ContentBlockTypeText {
 				if textVal, ok := item["content"]; ok {
 					if text, ok := textVal.(string); ok {
 						parts = append(parts, text)

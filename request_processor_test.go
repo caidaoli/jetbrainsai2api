@@ -25,7 +25,7 @@ func TestRequestProcessor_ProcessMessages(t *testing.T) {
 		{
 			name: "单一用户消息",
 			messages: []ChatMessage{
-				{Role: "user", Content: "Hello"},
+				{Role: RoleUser, Content: "Hello"},
 			},
 			expectedCount:  1,
 			expectCacheHit: false,
@@ -33,9 +33,9 @@ func TestRequestProcessor_ProcessMessages(t *testing.T) {
 		{
 			name: "多个消息",
 			messages: []ChatMessage{
-				{Role: "system", Content: "You are a helpful assistant"},
-				{Role: "user", Content: "Hello"},
-				{Role: "assistant", Content: "Hi there!"},
+				{Role: RoleSystem, Content: "You are a helpful assistant"},
+				{Role: RoleUser, Content: "Hello"},
+				{Role: RoleAssistant, Content: "Hi there!"},
 			},
 			expectedCount:  3,
 			expectCacheHit: false,
@@ -43,7 +43,7 @@ func TestRequestProcessor_ProcessMessages(t *testing.T) {
 		{
 			name: "测试缓存命中",
 			messages: []ChatMessage{
-				{Role: "user", Content: "Test caching"},
+				{Role: RoleUser, Content: "Test caching"},
 			},
 			expectedCount:  1,
 			expectCacheHit: false,
@@ -80,7 +80,7 @@ func TestRequestProcessor_ProcessTools_NoTools(t *testing.T) {
 
 	request := &ChatCompletionRequest{
 		Model:    "gpt-4",
-		Messages: []ChatMessage{{Role: "user", Content: "Hello"}},
+		Messages: []ChatMessage{{Role: RoleUser, Content: "Hello"}},
 		Tools:    []Tool{}, // 没有工具
 	}
 
@@ -104,10 +104,10 @@ func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
 
 	request := &ChatCompletionRequest{
 		Model:    "gpt-4",
-		Messages: []ChatMessage{{Role: "user", Content: "What's the weather?"}},
+		Messages: []ChatMessage{{Role: RoleUser, Content: "What's the weather?"}},
 		Tools: []Tool{
 			{
-				Type: "function",
+				Type: ToolTypeFunction,
 				Function: ToolFunction{
 					Name:        "get_weather",
 					Description: "Get weather information",
@@ -153,12 +153,12 @@ func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
 	request := &ChatCompletionRequest{
 		Model: "gpt-4",
 		Messages: []ChatMessage{
-			{Role: "user", Content: "Hello"},
+			{Role: RoleUser, Content: "Hello"},
 		},
 	}
 
 	jetbrainsMessages := []JetbrainsMessage{
-		{Type: "user_message", Content: "Hello"},
+		{Type: JetBrainsMessageTypeUser, Content: "Hello"},
 	}
 
 	data := []JetbrainsData{}
@@ -179,8 +179,8 @@ func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
 		t.Errorf("payload 应该是有效的 JSON: %v", err)
 	}
 
-	if payload.Prompt != "ij.chat.request.new-chat-on-start" {
-		t.Errorf("期望 prompt 为 'ij.chat.request.new-chat-on-start'，实际 '%s'", payload.Prompt)
+	if payload.Prompt != JetBrainsChatPrompt {
+		t.Errorf("期望 prompt 为 '%s'，实际 '%s'", JetBrainsChatPrompt, payload.Prompt)
 	}
 
 	if len(payload.Chat.Messages) != 1 {
@@ -193,10 +193,10 @@ func TestRequestProcessor_ProcessMessages_WithImageContent(t *testing.T) {
 
 	messages := []ChatMessage{
 		{
-			Role: "user",
+			Role: RoleUser,
 			Content: []any{
 				map[string]any{
-					"type": "text",
+					"type": ContentBlockTypeText,
 					"text": "What's in this image?",
 				},
 				map[string]any{
@@ -218,17 +218,16 @@ func TestRequestProcessor_ProcessMessages_WithImageContent(t *testing.T) {
 
 	// 验证类型正确
 	for _, msg := range result.JetbrainsMessages {
-		if msg.Type != "user_message" && msg.Type != "media_message" {
+		if msg.Type != JetBrainsMessageTypeUser && msg.Type != JetBrainsMessageTypeMedia {
 			t.Errorf("消息类型不正确: %s", msg.Type)
 		}
 	}
 }
 
 func TestRequestProcessor_ProcessTools_Caching(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache())
-
-	// 清空缓存
-	toolsValidationCache = NewCache()
+	// 使用新的缓存实例进行测试
+	testCache := NewCache()
+	processor := NewRequestProcessor(ModelsConfig{}, nil, testCache)
 
 	request := &ChatCompletionRequest{
 		Model: "gpt-4",

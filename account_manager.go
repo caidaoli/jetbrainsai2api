@@ -8,34 +8,6 @@ import (
 	"time"
 )
 
-// AccountManager 账户管理器接口
-// DIP: 依赖倒置原则 - 依赖抽象而非具体实现
-type AccountManager interface {
-	// AcquireAccount 获取一个可用账户
-	AcquireAccount(ctx context.Context) (*JetbrainsAccount, error)
-
-	// ReleaseAccount 释放账户回池
-	ReleaseAccount(account *JetbrainsAccount)
-
-	// GetAccountCount 获取账户总数
-	GetAccountCount() int
-
-	// GetAvailableCount 获取可用账户数
-	GetAvailableCount() int
-
-	// RefreshJWT 刷新账户 JWT
-	RefreshJWT(account *JetbrainsAccount) error
-
-	// CheckQuota 检查账户配额
-	CheckQuota(account *JetbrainsAccount) error
-
-	// GetAllAccounts 获取所有账户信息
-	GetAllAccounts() []JetbrainsAccount
-
-	// Close 关闭账户管理器
-	Close() error
-}
-
 // PooledAccountManager 基于池的账户管理器实现
 // SRP: 单一职责 - 只负责账户的获取、释放和生命周期管理
 type PooledAccountManager struct {
@@ -44,29 +16,57 @@ type PooledAccountManager struct {
 	mu         sync.RWMutex
 	jwtRefresh sync.Mutex
 	httpClient *http.Client
+
+	// 依赖注入
+	cache   *CacheService
+	logger  Logger
+	metrics MetricsCollector
+}
+
+// AccountManagerConfig 账户管理器配置
+type AccountManagerConfig struct {
+	Accounts   []JetbrainsAccount
+	HTTPClient *http.Client
+	Cache      *CacheService
+	Logger     Logger
+	Metrics    MetricsCollector
 }
 
 // NewPooledAccountManager 创建新的账户管理器
-func NewPooledAccountManager(configs []JetbrainsAccount, httpClient *http.Client) (*PooledAccountManager, error) {
-	if len(configs) == 0 {
+func NewPooledAccountManager(config AccountManagerConfig) (*PooledAccountManager, error) {
+	if len(config.Accounts) == 0 {
 		return nil, fmt.Errorf("no accounts provided")
 	}
 
+	// 使用默认值处理可选依赖
+	logger := config.Logger
+	if logger == nil {
+		logger = &nopLogger{}
+	}
+
+	metrics := config.Metrics
+	if metrics == nil {
+		metrics = &nopMetrics{}
+	}
+
 	am := &PooledAccountManager{
-		accounts:   make([]JetbrainsAccount, len(configs)),
-		pool:       make(chan *JetbrainsAccount, len(configs)),
-		httpClient: httpClient,
+		accounts:   make([]JetbrainsAccount, len(config.Accounts)),
+		pool:       make(chan *JetbrainsAccount, len(config.Accounts)),
+		httpClient: config.HTTPClient,
+		cache:      config.Cache,
+		logger:     logger,
+		metrics:    metrics,
 	}
 
 	// 复制账户配置
-	copy(am.accounts, configs)
+	copy(am.accounts, config.Accounts)
 
 	// 初始化账户池
 	for i := range am.accounts {
 		am.pool <- &am.accounts[i]
 	}
 
-	Info("Account manager initialized with %d accounts", len(configs))
+	am.logger.Info("Account manager initialized with %d accounts", len(config.Accounts))
 	return am, nil
 }
 
@@ -76,11 +76,11 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 	accountWaitStart := time.Now()
 
 	// 最多重试3次，避免无限循环
-	const maxRetries = 3
+	const maxRetries = AccountAcquireMaxRetries
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		select {
 		case <-ctx.Done():
-			RecordAccountPoolError()
+			am.metrics.RecordAccountPoolError()
 			return nil, fmt.Errorf("request cancelled while waiting for account: %w", ctx.Err())
 
 		case account := <-am.pool:
@@ -88,16 +88,16 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 			if attempt == 0 {
 				waitDuration := time.Since(accountWaitStart)
 				if waitDuration > 100*time.Millisecond {
-					RecordAccountPoolWait(waitDuration)
+					am.metrics.RecordAccountPoolWait(waitDuration)
 				}
 			}
 
 			// 检查并刷新 JWT（如果需要）
 			if account.LicenseID != "" {
 				if account.JWT == "" || time.Now().After(account.ExpiryTime.Add(-JWTRefreshTime)) {
-					if err := refreshJetbrainsJWT(account, am.httpClient); err != nil {
-						Error("Failed to refresh JWT for %s (attempt %d/%d): %v", getTokenDisplayName(account), attempt+1, maxRetries, err)
-						RecordAccountPoolError()
+					if err := am.refreshJWTInternal(account); err != nil {
+						am.logger.Error("Failed to refresh JWT for %s (attempt %d/%d): %v", getTokenDisplayName(account), attempt+1, maxRetries, err)
+						am.metrics.RecordAccountPoolError()
 						// JWT刷新失败，放回池中，重试下一个账户
 						am.ReleaseAccount(account)
 						continue
@@ -106,16 +106,16 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 			}
 
 			// 检查配额
-			if err := checkQuota(account, am.httpClient); err != nil {
-				Error("Failed to check quota for %s (attempt %d/%d): %v", getTokenDisplayName(account), attempt+1, maxRetries, err)
-				RecordAccountPoolError()
+			if err := am.checkQuotaInternal(account); err != nil {
+				am.logger.Error("Failed to check quota for %s (attempt %d/%d): %v", getTokenDisplayName(account), attempt+1, maxRetries, err)
+				am.metrics.RecordAccountPoolError()
 				// 配额检查失败，放回池中，重试下一个账户
 				am.ReleaseAccount(account)
 				continue
 			}
 
 			if !account.HasQuota {
-				Warn("Account %s is over quota (attempt %d/%d)", getTokenDisplayName(account), attempt+1, maxRetries)
+				am.logger.Warn("Account %s is over quota (attempt %d/%d)", getTokenDisplayName(account), attempt+1, maxRetries)
 				// 配额不足，放回池中，重试下一个账户
 				am.ReleaseAccount(account)
 				continue
@@ -124,14 +124,14 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 			// 成功获取账户
 			return account, nil
 
-		case <-time.After(60 * time.Second):
-			RecordAccountPoolError()
+		case <-time.After(AccountAcquireTimeout):
+			am.metrics.RecordAccountPoolError()
 			return nil, fmt.Errorf("timed out waiting for an available JetBrains account")
 		}
 	}
 
 	// 所有重试都失败
-	RecordAccountPoolError()
+	am.metrics.RecordAccountPoolError()
 	return nil, fmt.Errorf("failed to acquire account after %d attempts: all accounts unavailable", maxRetries)
 }
 
@@ -147,7 +147,7 @@ func (am *PooledAccountManager) ReleaseAccount(account *JetbrainsAccount) {
 		// 成功归还
 	default:
 		// 池满了（不应该发生）
-		Warn("account pool is full, could not return account %s", getTokenDisplayName(account))
+		am.logger.Warn("account pool is full, could not return account %s", getTokenDisplayName(account))
 	}
 }
 
@@ -174,12 +174,60 @@ func (am *PooledAccountManager) RefreshJWT(account *JetbrainsAccount) error {
 		return nil // 已经是新的了
 	}
 
+	return am.refreshJWTInternal(account)
+}
+
+// refreshJWTInternal 内部 JWT 刷新实现（不加锁）
+func (am *PooledAccountManager) refreshJWTInternal(account *JetbrainsAccount) error {
 	return refreshJetbrainsJWT(account, am.httpClient)
 }
 
 // CheckQuota 检查账户配额
 func (am *PooledAccountManager) CheckQuota(account *JetbrainsAccount) error {
-	return checkQuota(account, am.httpClient)
+	return am.checkQuotaInternal(account)
+}
+
+// checkQuotaInternal 内部配额检查实现
+func (am *PooledAccountManager) checkQuotaInternal(account *JetbrainsAccount) error {
+	// 如果最近检查过配额（1小时内），跳过检查
+	if account.LastQuotaCheck > 0 {
+		lastCheck := time.Unix(int64(account.LastQuotaCheck), 0)
+		if time.Since(lastCheck) < QuotaCacheTime {
+			// 配额检查仍然有效，跳过
+			return nil
+		}
+	}
+
+	// 使用注入的 cache，如果没有则使用直接调用
+	var quotaData *JetbrainsQuotaResponse
+	var err error
+
+	if am.cache != nil {
+		// 使用 CacheService 获取配额数据（已修复 TOCTOU）
+		cacheKey := generateQuotaCacheKey(account)
+		cached, found := am.cache.GetQuotaCache(cacheKey)
+		if found {
+			quotaData = cached
+		} else {
+			quotaData, err = getQuotaDataDirect(account, am.httpClient)
+			if err != nil {
+				account.HasQuota = false
+				return err
+			}
+			// 缓存结果
+			am.cache.SetQuotaCache(cacheKey, quotaData, QuotaCacheTime)
+		}
+	} else {
+		// 回退到直接调用（向后兼容）
+		quotaData, err = getQuotaData(account, am.httpClient)
+		if err != nil {
+			account.HasQuota = false
+			return err
+		}
+	}
+
+	processQuotaData(quotaData, account)
+	return nil
 }
 
 // GetAllAccounts 获取所有账户信息（只读）
@@ -196,6 +244,30 @@ func (am *PooledAccountManager) GetAllAccounts() []JetbrainsAccount {
 // Close 关闭账户管理器
 // 目前是空操作，但预留接口供将来扩展
 func (am *PooledAccountManager) Close() error {
-	Info("Account manager shutting down")
+	am.logger.Info("Account manager shutting down")
 	return nil
 }
+
+// nopLogger 默认日志实现（空操作）
+type nopLogger struct{}
+
+func (l *nopLogger) Debug(format string, args ...any) {}
+func (l *nopLogger) Info(format string, args ...any)  {}
+func (l *nopLogger) Warn(format string, args ...any)  {}
+func (l *nopLogger) Error(format string, args ...any) {}
+func (l *nopLogger) Fatal(format string, args ...any) {}
+
+// nopMetrics 默认指标收集器（空操作）
+type nopMetrics struct{}
+
+func (m *nopMetrics) RecordHTTPRequest(duration time.Duration)     {}
+func (m *nopMetrics) RecordHTTPError()                             {}
+func (m *nopMetrics) RecordCacheHit()                              {}
+func (m *nopMetrics) RecordCacheMiss()                             {}
+func (m *nopMetrics) RecordToolValidation(duration time.Duration)  {}
+func (m *nopMetrics) RecordAccountPoolWait(duration time.Duration) {}
+func (m *nopMetrics) RecordAccountPoolError()                      {}
+func (m *nopMetrics) UpdateSystemMetrics()                         {}
+func (m *nopMetrics) ResetWindow()                                 {}
+func (m *nopMetrics) GetQPS() float64                              { return 0 }
+func (m *nopMetrics) GetMetricsString() string                     { return "" }

@@ -18,11 +18,11 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 	// 第一遍：建立工具 ID 到工具名称的映射
 	toolIDToName := make(map[string]string)
 	for _, msg := range anthMessages {
-		if msg.Role == "assistant" && hasToolUse(msg.Content) {
+		if msg.Role == RoleAssistant && hasToolUse(msg.Content) {
 			if contentArray, ok := msg.Content.([]any); ok {
 				for _, block := range contentArray {
 					if blockMap, ok := block.(map[string]any); ok {
-						if blockType, _ := blockMap["type"].(string); blockType == "tool_use" {
+						if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeToolUse {
 							if id, ok := blockMap["id"].(string); ok {
 								if name, ok := blockMap["name"].(string); ok {
 									toolIDToName[id] = name
@@ -38,7 +38,7 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 	// 第二遍：转换消息
 	for _, msg := range anthMessages {
 		// 特殊处理：检查是否为包含 tool_result 的混合内容消息
-		if msg.Role == "user" && hasToolResult(msg.Content) {
+		if msg.Role == RoleUser && hasToolResult(msg.Content) {
 			// 提取并分别处理 tool_result 和常规文本内容
 			toolMessages, textContent := extractMixedContent(msg.Content, toolIDToName)
 
@@ -48,7 +48,7 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 			// 如果还有文本内容，添加为 user_message
 			if textContent != "" {
 				jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
-					Type:    "user_message",
+					Type:    JetBrainsMessageTypeUser,
 					Content: textContent,
 				})
 			}
@@ -58,19 +58,19 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 		// 常规消息处理
 		var messageType string
 		switch msg.Role {
-		case "user":
-			messageType = "user_message"
-		case "assistant":
+		case RoleUser:
+			messageType = JetBrainsMessageTypeUser
+		case RoleAssistant:
 			// 检查是否包含工具调用
 			if hasToolUse(msg.Content) {
-				messageType = "assistant_message_tool"
+				messageType = JetBrainsMessageTypeAssistantTool
 			} else {
-				messageType = "assistant_message"
+				messageType = JetBrainsMessageTypeAssistant
 			}
-		case "tool":
-			messageType = "tool_message"
+		case RoleTool:
+			messageType = JetBrainsMessageTypeTool
 		default:
-			messageType = "user_message" // 默认为用户消息
+			messageType = JetBrainsMessageTypeUser // 默认为用户消息
 		}
 
 		jetbrainsMessage := JetbrainsMessage{
@@ -79,12 +79,12 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 		}
 
 		// 如果是工具相关消息，需要添加额外字段
-		if messageType == "assistant_message_tool" || messageType == "tool_message" {
+		if messageType == JetBrainsMessageTypeAssistantTool || messageType == JetBrainsMessageTypeTool {
 			// 从内容中提取工具信息
 			if toolInfo := extractToolInfo(msg.Content); toolInfo != nil {
 				jetbrainsMessage.ID = toolInfo.ID
 				jetbrainsMessage.ToolName = toolInfo.Name
-				if messageType == "tool_message" {
+				if messageType == JetBrainsMessageTypeTool {
 					jetbrainsMessage.Result = toolInfo.Result
 					// tool_message 不需要 content 字段，只需要 result
 					jetbrainsMessage.Content = ""
@@ -120,7 +120,7 @@ func anthropicToJetbrainsTools(anthTools []AnthropicTool) []JetbrainsToolDefinit
 func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbrainsMessages []JetbrainsMessage, data []JetbrainsData, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
 	internalModel := getInternalModelName(s.modelsConfig, anthReq.Model)
 	payload := JetbrainsPayload{
-		Prompt:  "ij.chat.request.new-chat-on-start",
+		Prompt:  JetBrainsChatPrompt,
 		Profile: internalModel,
 		Chat:    JetbrainsChat{Messages: jetbrainsMessages},
 	}
@@ -145,14 +145,14 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 	Debug("=== End Upstream Payload ===")
 	Debug("=== End Debug ===")
 
-	req, err := http.NewRequest("POST", "https://api.jetbrains.ai/user/v5/llm/chat/stream/v8", bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequest(http.MethodPost, JetBrainsChatEndpoint, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create request")
 	}
 
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set(HeaderAccept, ContentTypeEventStream)
+	req.Header.Set(HeaderContentType, ContentTypeJSON)
+	req.Header.Set(HeaderCacheControl, CacheControlNoCache)
 	setJetbrainsHeaders(req, account.JWT)
 
 	resp, err := s.httpClient.Do(req)
@@ -162,7 +162,7 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 
 	Debug("JetBrains API Response Status: %d", resp.StatusCode)
 
-	if resp.StatusCode == 477 {
+	if resp.StatusCode == JetBrainsStatusQuotaExhausted {
 		Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
 		account.HasQuota = false
 		account.LastQuotaCheck = float64(time.Now().Unix())
@@ -192,11 +192,11 @@ func extractStringContent(content any) string {
 		var textParts []string
 		for _, block := range v {
 			if blockMap, ok := block.(map[string]any); ok {
-				if blockType, _ := blockMap["type"].(string); blockType == "text" {
+				if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeText {
 					if text, _ := blockMap["text"].(string); text != "" {
 						textParts = append(textParts, text)
 					}
-				} else if blockType == "tool_use" {
+				} else if blockType == ContentBlockTypeToolUse {
 					// 对于工具使用，返回JSON格式的参数
 					if input, ok := blockMap["input"]; ok {
 						if inputJSON, err := marshalJSON(input); err == nil {
@@ -218,7 +218,7 @@ func hasToolUse(content any) bool {
 	if contentArray, ok := content.([]any); ok {
 		for _, block := range contentArray {
 			if blockMap, ok := block.(map[string]any); ok {
-				if blockType, _ := blockMap["type"].(string); blockType == "tool_use" {
+				if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeToolUse {
 					return true
 				}
 			}
@@ -232,7 +232,7 @@ func hasToolResult(content any) bool {
 	if contentArray, ok := content.([]any); ok {
 		for _, block := range contentArray {
 			if blockMap, ok := block.(map[string]any); ok {
-				if blockType, _ := blockMap["type"].(string); blockType == "tool_result" {
+				if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeToolResult {
 					return true
 				}
 			}
@@ -251,10 +251,10 @@ func extractMixedContent(content any, toolIDToName map[string]string) ([]Jetbrai
 			if blockMap, ok := block.(map[string]any); ok {
 				blockType, _ := blockMap["type"].(string)
 
-				if blockType == "tool_result" {
+				if blockType == ContentBlockTypeToolResult {
 					// 创建 tool_message
 					toolMsg := JetbrainsMessage{
-						Type:    "tool_message",
+						Type:    JetBrainsMessageTypeTool,
 						Content: "",
 					}
 
@@ -293,7 +293,7 @@ func extractMixedContent(content any, toolIDToName map[string]string) ([]Jetbrai
 
 					toolMessages = append(toolMessages, toolMsg)
 
-				} else if blockType == "text" {
+				} else if blockType == ContentBlockTypeText {
 					// 提取文本内容
 					if text, ok := blockMap["text"].(string); ok && text != "" {
 						textParts = append(textParts, text)
@@ -321,7 +321,7 @@ func extractToolInfo(content any) *ToolInfo {
 			if blockMap, ok := block.(map[string]any); ok {
 				blockType, _ := blockMap["type"].(string)
 
-				if blockType == "tool_use" {
+				if blockType == ContentBlockTypeToolUse {
 					toolInfo := &ToolInfo{}
 					if id, ok := blockMap["id"].(string); ok {
 						toolInfo.ID = id
@@ -330,7 +330,7 @@ func extractToolInfo(content any) *ToolInfo {
 						toolInfo.Name = name
 					}
 					return toolInfo
-				} else if blockType == "tool_result" {
+				} else if blockType == ContentBlockTypeToolResult {
 					toolInfo := &ToolInfo{}
 					if id, ok := blockMap["tool_use_id"].(string); ok {
 						toolInfo.ID = id

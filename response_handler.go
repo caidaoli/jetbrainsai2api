@@ -21,7 +21,7 @@ func generateShortToolCallID() string {
 	// Anthropic format: toolu_01G4sznjWs4orN79KqRAsQ5E (typically 22-26 chars)
 	bytes := make([]byte, 10)
 	rand.Read(bytes)
-	return fmt.Sprintf("toolu_%s", hex.EncodeToString(bytes))
+	return fmt.Sprintf("%s%s", ToolCallIDPrefix, hex.EncodeToString(bytes))
 }
 
 // processJetbrainsStream processes the event stream from the JetBrains API.
@@ -31,7 +31,7 @@ func processJetbrainsStream(resp *http.Response, onEvent func(event map[string]a
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if !strings.HasPrefix(line, "data: ") || line == "data: end" {
+		if !strings.HasPrefix(line, StreamChunkPrefix) || line == StreamEndLine {
 			continue
 		}
 
@@ -50,11 +50,9 @@ func processJetbrainsStream(resp *http.Response, onEvent func(event map[string]a
 
 // handleStreamingResponse handles streaming responses from the JetBrains API
 func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCompletionRequest, startTime time.Time, accountIdentifier string) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
+	setStreamingHeaders(c, APIFormatOpenAI)
 
-	streamID := "chatcmpl-" + uuid.New().String()
+	streamID := ResponseIDPrefix + uuid.New().String()
 	firstChunkSent := false
 	var currentTool *map[string]any
 
@@ -62,7 +60,7 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
-		case "Content":
+		case JetBrainsEventTypeContent:
 			content, _ := data["content"].(string)
 			if content == "" {
 				return true // Continue processing
@@ -71,7 +69,7 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 			var deltaPayload map[string]any
 			if !firstChunkSent {
 				deltaPayload = map[string]any{
-					"role":    "assistant",
+					"role":    RoleAssistant,
 					"content": content,
 				}
 				firstChunkSent = true
@@ -83,16 +81,16 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 
 			streamResp := StreamResponse{
 				ID:      streamID,
-				Object:  "chat.completion.chunk",
+				Object:  ChatCompletionChunkObjectType,
 				Created: time.Now().Unix(),
 				Model:   request.Model,
 				Choices: []StreamChoice{{Delta: deltaPayload}},
 			}
 
 			respJSON, _ := marshalJSON(streamResp)
-			fmt.Fprintf(c.Writer, "data: %s\n\n", string(respJSON))
+			writeSSEData(c.Writer, respJSON)
 			c.Writer.Flush()
-		case "ToolCall":
+		case JetBrainsEventTypeToolCall:
 			// 处理新的ToolCall格式 - 使用上游提供的ID
 			if upstreamID, ok := data["id"].(string); ok && upstreamID != "" {
 				// 开始新的工具调用 - 使用上游提供的ID
@@ -104,7 +102,7 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 							"arguments": "",
 							"name":      name,
 						},
-						"type": "function",
+						"type": ToolTypeFunction,
 					}
 					Debug("Started new tool call with upstream ID: %s, name: %s", upstreamID, name)
 				}
@@ -117,7 +115,7 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 					}
 				}
 			}
-		case "FunctionCall":
+		case JetBrainsEventTypeFunctionCall:
 			funcNameInterface := data["name"]
 			funcArgs, _ := data["content"].(string)
 
@@ -136,7 +134,7 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 						"arguments": "",
 						"name":      funcName,
 					},
-					"type": "function",
+					"type": ToolTypeFunction,
 				}
 			} else if currentTool != nil {
 				if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
@@ -144,7 +142,7 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 					funcMap["arguments"] = currentArgs + funcArgs
 				}
 			}
-		case "FinishMetadata":
+		case JetBrainsEventTypeFinishMetadata:
 			if currentTool != nil {
 				// Validate the tool call arguments before sending
 				if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
@@ -162,27 +160,27 @@ func handleStreamingResponse(c *gin.Context, resp *http.Response, request ChatCo
 				}
 				streamResp := StreamResponse{
 					ID:      streamID,
-					Object:  "chat.completion.chunk",
+					Object:  ChatCompletionChunkObjectType,
 					Created: time.Now().Unix(),
 					Model:   request.Model,
 					Choices: []StreamChoice{{Delta: deltaPayload}},
 				}
 				respJSON, _ := marshalJSON(streamResp)
-				fmt.Fprintf(c.Writer, "data: %s\n\n", string(respJSON))
+				writeSSEData(c.Writer, respJSON)
 				c.Writer.Flush()
 			}
 
 			finalResp := StreamResponse{
 				ID:      streamID,
-				Object:  "chat.completion.chunk",
+				Object:  ChatCompletionChunkObjectType,
 				Created: time.Now().Unix(),
 				Model:   request.Model,
-				Choices: []StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr("tool_calls")}},
+				Choices: []StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(FinishReasonToolCalls)}},
 			}
 
 			respJSON, _ := marshalJSON(finalResp)
-			fmt.Fprintf(c.Writer, "data: %s\n\n", string(respJSON))
-			c.Writer.Write([]byte("data: [DONE]\n\n"))
+			writeSSEData(c.Writer, respJSON)
+			writeSSEDone(c.Writer)
 			c.Writer.Flush()
 			return false // Stop processing
 		}
@@ -203,11 +201,11 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
-		case "Content":
+		case JetBrainsEventTypeContent:
 			if content, ok := data["content"].(string); ok {
 				contentBuilder.WriteString(content)
 			}
-		case "ToolCall":
+		case JetBrainsEventTypeToolCall:
 			// 处理新的ToolCall格式 - 使用上游提供的ID
 			if upstreamID, ok := data["id"].(string); ok && upstreamID != "" {
 				// 开始新的工具调用 - 记录上游ID
@@ -218,7 +216,7 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 					if len(toolCalls) == 0 {
 						toolCalls = append(toolCalls, ToolCall{
 							ID:   upstreamID, // 使用上游提供的ID
-							Type: "function",
+							Type: ToolTypeFunction,
 							Function: Function{
 								Name:      name,
 								Arguments: "",
@@ -235,7 +233,7 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 					toolCalls[len(toolCalls)-1].Function.Arguments += content
 				}
 			}
-		case "FunctionCall":
+		case JetBrainsEventTypeFunctionCall:
 			funcNameInterface := data["name"]
 			funcArgs, _ := data["content"].(string)
 
@@ -251,7 +249,7 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 				currentFuncArgs = ""
 			}
 			currentFuncArgs += funcArgs
-		case "FinishMetadata":
+		case JetBrainsEventTypeFinishMetadata:
 			// 完成工具调用参数收集 - toolCalls已在ToolCall事件中创建
 			if len(toolCalls) > 0 {
 				// 验证最后一个工具调用
@@ -264,7 +262,7 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 				// 后备方案：如果没有通过ToolCall事件创建，则创建一个
 				toolCall := ToolCall{
 					ID:   generateShortToolCallID(), // 后备方案
-					Type: "function",
+					Type: ToolTypeFunction,
 					Function: Function{
 						Name:      currentFuncName,
 						Arguments: currentFuncArgs,
@@ -279,19 +277,19 @@ func handleNonStreamingResponse(c *gin.Context, resp *http.Response, request Cha
 	})
 
 	message := ChatMessage{
-		Role:    "assistant",
+		Role:    RoleAssistant,
 		Content: contentBuilder.String(),
 	}
 
-	finishReason := "stop"
+	finishReason := FinishReasonStop
 	if len(toolCalls) > 0 {
 		message.ToolCalls = toolCalls
-		finishReason = "tool_calls"
+		finishReason = FinishReasonToolCalls
 	}
 
 	response := ChatCompletionResponse{
-		ID:      "chatcmpl-" + uuid.New().String(),
-		Object:  "chat.completion",
+		ID:      ResponseIDPrefix + uuid.New().String(),
+		Object:  ChatCompletionObjectType,
 		Created: time.Now().Unix(),
 		Model:   request.Model,
 		Choices: []ChatCompletionChoice{{

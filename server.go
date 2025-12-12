@@ -25,8 +25,8 @@ type Server struct {
 	httpClient     *http.Client
 	router         *gin.Engine
 
-	// 缓存（新增：消除全局变量）
-	cache Cache
+	// 缓存（使用 CacheService 消除全局变量）
+	cache *CacheService
 
 	// 认证和模型
 	validClientKeys map[string]bool
@@ -41,38 +41,6 @@ type Server struct {
 	shutdownCancel context.CancelFunc
 }
 
-// ServerConfig 服务器配置
-type ServerConfig struct {
-	Port               string
-	GinMode            string
-	ClientAPIKeys      []string
-	JetbrainsAccounts  []JetbrainsAccount
-	ModelsConfigPath   string
-	HTTPClientSettings HTTPClientSettings
-}
-
-// HTTPClientSettings HTTP 客户端配置
-type HTTPClientSettings struct {
-	MaxIdleConns        int
-	MaxIdleConnsPerHost int
-	MaxConnsPerHost     int
-	IdleConnTimeout     time.Duration
-	TLSHandshakeTimeout time.Duration
-	RequestTimeout      time.Duration
-}
-
-// DefaultHTTPClientSettings 默认 HTTP 客户端配置
-func DefaultHTTPClientSettings() HTTPClientSettings {
-	return HTTPClientSettings{
-		MaxIdleConns:        500,
-		MaxIdleConnsPerHost: 100,
-		MaxConnsPerHost:     200,
-		IdleConnTimeout:     600 * time.Second,
-		TLSHandshakeTimeout: 30 * time.Second,
-		RequestTimeout:      5 * time.Minute,
-	}
-}
-
 // NewServer 创建新的服务器实例
 // OCP: 通过配置开放扩展，对修改封闭
 func NewServer(config ServerConfig) (*Server, error) {
@@ -83,17 +51,23 @@ func NewServer(config ServerConfig) (*Server, error) {
 	// 创建 HTTP 客户端（必须先创建，因为 AccountManager 需要它）
 	httpClient := createOptimizedHTTPClient(config.HTTPClientSettings)
 
-	// 创建缓存实例（消除全局变量）
-	cache := NewCache()
+	// 创建缓存服务（消除全局变量）
+	cacheService := NewCacheService()
 
-	// 创建账户管理器
-	accountManager, err := NewPooledAccountManager(config.JetbrainsAccounts, httpClient)
+	// 创建账户管理器（使用新的配置式构造函数）
+	accountManager, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   config.JetbrainsAccounts,
+		HTTPClient: httpClient,
+		Cache:      cacheService,
+		Logger:     appLogger,
+		Metrics:    nil, // 使用默认空实现
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account manager: %w", err)
 	}
 
-	// 加载模型配置
-	modelsData, modelsConfig, err := loadModelsConfig(config.ModelsConfigPath)
+	// 加载模型配置（使用新的config.go中的函数）
+	modelsData, modelsConfig, err := GetModelsConfig(config.ModelsConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load models config: %w", err)
 	}
@@ -118,11 +92,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 		ginMode:          config.GinMode,
 		accountManager:   accountManager,
 		httpClient:       httpClient,
-		cache:            cache,
+		cache:            cacheService,
 		validClientKeys:  validClientKeys,
 		modelsData:       modelsData,
 		modelsConfig:     modelsConfig,
-		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cache),
+		requestProcessor: NewRequestProcessor(modelsConfig, httpClient, cacheService),
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,
 	}
@@ -141,10 +115,10 @@ func createOptimizedHTTPClient(settings HTTPClientSettings) *http.Client {
 		MaxConnsPerHost:       settings.MaxConnsPerHost,
 		IdleConnTimeout:       settings.IdleConnTimeout,
 		TLSHandshakeTimeout:   settings.TLSHandshakeTimeout,
-		ExpectContinueTimeout: 5 * time.Second,
+		ExpectContinueTimeout: HTTPExpectContinueTimeout,
 		DisableKeepAlives:     false,
 		ForceAttemptHTTP2:     true,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: HTTPResponseHeaderTimeout,
 		DisableCompression:    false,
 	}
 
@@ -154,8 +128,8 @@ func createOptimizedHTTPClient(settings HTTPClientSettings) *http.Client {
 	}
 }
 
-// loadModelsConfig 加载模型配置
-func loadModelsConfig(path string) (ModelsData, ModelsConfig, error) {
+// GetModelsConfig 加载模型配置（使用新的config.go中的函数）
+func GetModelsConfig(path string) (ModelsData, ModelsConfig, error) {
 	modelsData, err := loadModels()
 	if err != nil {
 		return modelsData, ModelsConfig{}, fmt.Errorf("failed to load models: %w", err)
@@ -225,13 +199,12 @@ func (s *Server) setupGracefulShutdown() {
 		// 保存统计数据
 		saveStats()
 
-		// 停止缓存后台 goroutine
-		messageConversionCache.Stop()
-		toolsValidationCache.Stop()
-		validatedToolsCache.Stop()
-		paramTransformCache.Stop()
+		// 停止缓存服务
+		if s.cache != nil {
+			s.cache.Close()
+		}
 
-		// 停止性能监控
+		// 停止性能监控（向后兼容）
 		StopMetricsMonitor()
 
 		// 关闭账户管理器
@@ -252,7 +225,7 @@ func (s *Server) healthCheck(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"status":     "healthy",
 		"service":    "jetbrainsai2api",
-		"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+		"timestamp":  time.Now().Format(TimeFormatDateTime),
 		"accounts":   s.accountManager.GetAccountCount(),
 		"available":  s.accountManager.GetAvailableCount(),
 		"valid_keys": len(s.validClientKeys),
@@ -261,12 +234,8 @@ func (s *Server) healthCheck(c *gin.Context) {
 
 // getStatsData 获取统计数据
 func (s *Server) getStatsData(c *gin.Context) {
-	// 清除配额缓存
-	quotaCacheMutex.Lock()
-	for key := range accountQuotaCache {
-		delete(accountQuotaCache, key)
-	}
-	quotaCacheMutex.Unlock()
+	// 清除配额缓存（使用 CacheService）
+	globalCacheService.ClearQuotaCache()
 
 	// 获取所有账户信息
 	accounts := s.accountManager.GetAllAccounts()
@@ -291,7 +260,7 @@ func (s *Server) getStatsData(c *gin.Context) {
 				"used":       tokenInfo.Used,
 				"total":      tokenInfo.Total,
 				"usageRate":  tokenInfo.UsageRate,
-				"expiryDate": tokenInfo.ExpiryDate.Format("2006-01-02 15:04:05"),
+				"expiryDate": tokenInfo.ExpiryDate.Format(TimeFormatDateTime),
 				"status":     tokenInfo.Status,
 			})
 		}
@@ -309,23 +278,23 @@ func (s *Server) getStatsData(c *gin.Context) {
 		account := &accounts[i]
 		expiryTime := account.ExpiryTime
 
-		status := "正常"
-		warning := "正常"
-		if time.Now().Add(1 * time.Hour).After(expiryTime) {
-			status = "即将过期"
-			warning = "即将过期"
+		status := AccountStatusNormal
+		warning := AccountStatusNormal
+		if time.Now().Add(JWTExpiryCheckTime).After(expiryTime) {
+			status = AccountStatusExpiring
+			warning = AccountStatusExpiring
 		}
 
 		expiryInfo = append(expiryInfo, gin.H{
 			"name":       getTokenDisplayName(account),
-			"expiryTime": expiryTime.Format("2006-01-02 15:04:05"),
+			"expiryTime": expiryTime.Format(TimeFormatDateTime),
 			"status":     status,
 			"warning":    warning,
 		})
 	}
 
 	c.JSON(200, gin.H{
-		"currentTime":  time.Now().Format("2006-01-02 15:04:05"),
+		"currentTime":  time.Now().Format(TimeFormatDateTime),
 		"currentQPS":   fmt.Sprintf("%.3f", currentQPS),
 		"totalRecords": len(atomicStats.GetHistory()),
 		"stats24h":     stats24h,
@@ -334,23 +303,6 @@ func (s *Server) getStatsData(c *gin.Context) {
 		"tokensInfo":   tokensInfo,
 		"expiryInfo":   expiryInfo,
 	})
-}
-
-// corsMiddleware CORS中间件
-func (s *Server) corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key")
-		c.Header("Access-Control-Max-Age", "86400")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-
-		c.Next()
-	}
 }
 
 // Close 关闭服务器

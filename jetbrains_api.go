@@ -15,16 +15,15 @@ import (
 
 var (
 	jwtRefreshMutex sync.Mutex
-	quotaCacheMutex sync.RWMutex
 )
 
 // setJetbrainsHeaders sets the required headers for JetBrains API requests
 func setJetbrainsHeaders(req *http.Request, jwt string) {
-	req.Header.Set("User-Agent", "ktor-client")
-	req.Header.Set("Accept-Charset", "UTF-8")
-	req.Header.Set("grazie-agent", `{"name":"aia:pycharm","version":"251.26094.80.13:251.26094.141"}`)
+	req.Header.Set("User-Agent", JetBrainsHeaderUserAgent)
+	req.Header.Set(HeaderAcceptCharset, CharsetUTF8)
+	req.Header.Set(HeaderGrazieAgent, JetBrainsHeaderGrazieAgent)
 	if jwt != "" {
-		req.Header.Set("grazie-authenticate-jwt", jwt)
+		req.Header.Set(HeaderGrazieAuthJWT, jwt)
 	}
 }
 
@@ -35,13 +34,13 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 		return nil, err
 	}
 
-	if resp.StatusCode == 401 && account.LicenseID != "" {
+	if resp.StatusCode == HTTPStatusUnauthorized && account.LicenseID != "" {
 		resp.Body.Close()
 		Info("JWT for %s expired, refreshing...", getTokenDisplayName(account))
 
 		jwtRefreshMutex.Lock()
 		// Check if another goroutine already refreshed the JWT
-		if req.Header.Get("grazie-authenticate-jwt") == account.JWT {
+		if req.Header.Get(HeaderGrazieAuthJWT) == account.JWT {
 			if err := refreshJetbrainsJWT(account, httpClient); err != nil {
 				jwtRefreshMutex.Unlock()
 				return nil, err
@@ -49,7 +48,7 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 		}
 		jwtRefreshMutex.Unlock()
 
-		req.Header.Set("grazie-authenticate-jwt", account.JWT)
+		req.Header.Set(HeaderGrazieAuthJWT, account.JWT)
 		return httpClient.Do(req)
 	}
 
@@ -75,7 +74,7 @@ func checkQuota(account *JetbrainsAccount, httpClient *http.Client) error {
 	// 如果最近检查过配额（1小时内），跳过检查
 	if account.LastQuotaCheck > 0 {
 		lastCheck := time.Unix(int64(account.LastQuotaCheck), 0)
-		if time.Since(lastCheck) < time.Duration(QuotaCacheTime)*time.Second {
+		if time.Since(lastCheck) < QuotaCacheTime {
 			// 配额检查仍然有效，跳过
 			return nil
 		}
@@ -96,7 +95,7 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 	Info("Refreshing JWT for licenseId %s...", account.LicenseID)
 
 	payload := map[string]string{"licenseId": account.LicenseID}
-	req, err := createJetbrainsRequest("POST", "https://api.jetbrains.ai/auth/jetbrains-jwt/provide-access/license/v2", payload, account.Authorization)
+	req, err := createJetbrainsRequest(http.MethodPost, JetBrainsJWTEndpoint, payload, account.Authorization)
 	if err != nil {
 		return err
 	}
@@ -162,6 +161,7 @@ func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccou
 	account.LastQuotaCheck = float64(time.Now().Unix())
 }
 
+// getQuotaData 获取配额数据（使用 CacheService）
 func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*JetbrainsQuotaResponse, error) {
 	if err := ensureValidJWT(account, httpClient); err != nil {
 		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
@@ -171,24 +171,37 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*Jetbrain
 		return nil, fmt.Errorf("account has no JWT")
 	}
 
-	// 修复: 使用 licenseID 作为缓存键而非 JWT，避免敏感信息泄露
-	quotaCacheMutex.RLock()
-	cacheKey := account.LicenseID
-	if cacheKey == "" {
-		// 如果没有 licenseID，使用 JWT 的前8个字符作为标识（仅用于缓存键）
-		if len(account.JWT) > 8 {
-			cacheKey = account.JWT[:8]
-		} else {
-			cacheKey = account.JWT
-		}
-	}
-	if cachedInfo, found := accountQuotaCache[cacheKey]; found && time.Since(cachedInfo.LastAccess) < QuotaCacheTime {
-		quotaCacheMutex.RUnlock()
-		return cachedInfo.QuotaData, nil
-	}
-	quotaCacheMutex.RUnlock()
+	// 使用统一的缓存键生成函数
+	cacheKey := generateQuotaCacheKey(account)
 
-	req, err := http.NewRequest("POST", "https://api.jetbrains.ai/user/v5/quota/get", nil)
+	// 从 CacheService 获取缓存（已内置深拷贝防止 TOCTOU）
+	if cachedData, found := globalCacheService.GetQuotaCache(cacheKey); found {
+		return cachedData, nil
+	}
+
+	// 调用直接获取函数
+	quotaData, err := getQuotaDataDirect(account, httpClient)
+	if err != nil {
+		return nil, err
+	}
+
+	// 更新缓存（使用 CacheService）
+	globalCacheService.SetQuotaCache(cacheKey, quotaData, QuotaCacheTime)
+
+	return quotaData, nil
+}
+
+// getQuotaDataDirect 直接从 JetBrains API 获取配额数据（不使用全局缓存）
+func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client) (*JetbrainsQuotaResponse, error) {
+	if err := ensureValidJWT(account, httpClient); err != nil {
+		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
+	}
+
+	if account.JWT == "" {
+		return nil, fmt.Errorf("account has no JWT")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, JetBrainsQuotaEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -205,10 +218,9 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*Jetbrain
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		// 如果是401，则JWT可能已失效，从缓存中删除
-		if resp.StatusCode == 401 {
-			quotaCacheMutex.Lock()
-			delete(accountQuotaCache, cacheKey)
-			quotaCacheMutex.Unlock()
+		if resp.StatusCode == HTTPStatusUnauthorized {
+			cacheKey := generateQuotaCacheKey(account)
+			globalCacheService.DeleteQuotaCache(cacheKey)
 		}
 		return nil, fmt.Errorf("quota check failed with status %d: %s", resp.StatusCode, string(body))
 	}
@@ -217,14 +229,6 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client) (*Jetbrain
 	if err := sonic.ConfigDefault.NewDecoder(resp.Body).Decode(&quotaData); err != nil {
 		return nil, err
 	}
-
-	// 更新缓存
-	quotaCacheMutex.Lock()
-	accountQuotaCache[cacheKey] = &CachedQuotaInfo{
-		QuotaData:  &quotaData,
-		LastAccess: time.Now(),
-	}
-	quotaCacheMutex.Unlock()
 
 	if IsDebug() {
 		quotaJSON, _ := sonic.MarshalIndent(quotaData, "", "  ")

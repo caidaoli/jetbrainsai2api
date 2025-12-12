@@ -57,7 +57,7 @@ func (p *RequestProcessor) ProcessMessages(messages []ChatMessage) ProcessMessag
 	jetbrainsMessages := openAIToJetbrainsMessages(messages)
 
 	// 缓存结果
-	p.cache.Set(cacheKey, jetbrainsMessages, 10*time.Minute)
+	p.cache.Set(cacheKey, jetbrainsMessages, MessageConversionCacheTTL)
 
 	return ProcessMessagesResult{
 		JetbrainsMessages: jetbrainsMessages,
@@ -84,8 +84,8 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 
 	// 强制工具使用（如果提供了工具）
 	if request.ToolChoice == nil {
-		request.ToolChoice = "any"
-		Debug("FORCING tool_choice to 'any' for tool usage guarantee")
+		request.ToolChoice = ToolChoiceAny
+		Debug("FORCING tool_choice to '%s' for tool usage guarantee", ToolChoiceAny)
 	}
 
 	// 尝试从缓存获取验证结果（使用注入的 cache 而非全局变量）
@@ -119,7 +119,7 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 	}
 
 	// 缓存验证结果
-	p.cache.Set(toolsCacheKey, validatedTools, 30*time.Minute)
+	p.cache.Set(toolsCacheKey, validatedTools, ToolsValidationCacheTTL)
 
 	// 构建工具数据
 	data := p.buildToolsData(validatedTools)
@@ -182,7 +182,7 @@ func (p *RequestProcessor) BuildJetbrainsPayload(
 	internalModel := getInternalModelName(p.modelsConfig, request.Model)
 
 	payload := JetbrainsPayload{
-		Prompt:  "ij.chat.request.new-chat-on-start",
+		Prompt:  JetBrainsChatPrompt,
 		Profile: internalModel,
 		Chat:    JetbrainsChat{Messages: messages},
 	}
@@ -218,17 +218,17 @@ func (p *RequestProcessor) SendUpstreamRequest(
 ) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(
 		ctx,
-		"POST",
-		"https://api.jetbrains.ai/user/v5/llm/chat/stream/v8",
+		http.MethodPost,
+		JetBrainsChatEndpoint,
 		bytes.NewBuffer(payloadBytes),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set(HeaderAccept, ContentTypeEventStream)
+	req.Header.Set(HeaderContentType, ContentTypeJSON)
+	req.Header.Set(HeaderCacheControl, CacheControlNoCache)
 	setJetbrainsHeaders(req, account.JWT)
 
 	resp, err := p.httpClient.Do(req)
@@ -239,7 +239,7 @@ func (p *RequestProcessor) SendUpstreamRequest(
 	Debug("JetBrains API Response Status: %d", resp.StatusCode)
 
 	// 检查配额状态
-	if resp.StatusCode == 477 {
+	if resp.StatusCode == JetBrainsStatusQuotaExhausted {
 		Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
 		account.HasQuota = false
 		account.LastQuotaCheck = float64(time.Now().Unix())
