@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -13,12 +12,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var (
-	// jwtRefreshMutex 用于同步 JWT 刷新操作，防止多个 goroutine 同时刷新同一账户的 JWT
-	// TODO: 考虑将此 mutex 移至 JetbrainsAccount 结构体中，实现 per-account 锁定，
-	// 减少不同账户之间的锁竞争
-	jwtRefreshMutex sync.Mutex
-)
+// 注意：JWT 刷新不需要全局锁，因为：
+// 1. 正常请求流程中，账户从 channel 获取，保证同一时间只有一个 goroutine 持有
+// 2. 统计页面操作的是账户副本，不影响原始账户
+// 3. AccountManager.RefreshJWT() 有自己的实例锁用于显式刷新场景
 
 // setJetbrainsHeaders sets the required headers for JetBrains API requests
 func setJetbrainsHeaders(req *http.Request, jwt string) {
@@ -31,6 +28,7 @@ func setJetbrainsHeaders(req *http.Request, jwt string) {
 }
 
 // handleJWTExpiredAndRetry handles JWT expiration and retries the request
+// 注意：此函数假设调用者已经独占账户（通过 AcquireAccount），因此不需要锁
 func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, httpClient *http.Client) (*http.Response, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -41,15 +39,10 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 		resp.Body.Close()
 		Info("JWT for %s expired, refreshing...", getTokenDisplayName(account))
 
-		jwtRefreshMutex.Lock()
-		// Check if another goroutine already refreshed the JWT
-		if req.Header.Get(HeaderGrazieAuthJWT) == account.JWT {
-			if err := refreshJetbrainsJWT(account, httpClient); err != nil {
-				jwtRefreshMutex.Unlock()
-				return nil, err
-			}
+		// 刷新 JWT（账户已被当前 goroutine 独占，无需锁）
+		if err := refreshJetbrainsJWT(account, httpClient); err != nil {
+			return nil, err
 		}
-		jwtRefreshMutex.Unlock()
 
 		req.Header.Set(HeaderGrazieAuthJWT, account.JWT)
 		return httpClient.Do(req)
@@ -59,15 +52,10 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 }
 
 // ensureValidJWT ensures that the account has a valid JWT
+// 注意：此函数假设调用者已经独占账户（通过 AcquireAccount），因此不需要锁
 func ensureValidJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	if account.JWT == "" && account.LicenseID != "" {
-		jwtRefreshMutex.Lock()
-		defer jwtRefreshMutex.Unlock()
-
-		// Double-check after acquiring lock
-		if account.JWT == "" {
-			return refreshJetbrainsJWT(account, httpClient)
-		}
+		return refreshJetbrainsJWT(account, httpClient)
 	}
 	return nil
 }
