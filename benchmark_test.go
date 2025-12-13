@@ -70,7 +70,7 @@ func BenchmarkMessageConversionParallel(b *testing.B) {
 func BenchmarkToolsValidation(b *testing.B) {
 	cache := NewCacheService()
 	metrics := newMockMetrics()
-	logger := &nopLogger{}
+	logger := &NopLogger{}
 	tools := []Tool{
 		{
 			Type: ToolTypeFunction,

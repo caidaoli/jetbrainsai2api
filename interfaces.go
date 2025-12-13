@@ -68,15 +68,43 @@ type MetricsCollector interface {
 	GetMetricsString() string
 }
 
+// ==================== Nop 实现（用于测试和默认值） ====================
+
+// NopLogger 空日志实现
+type NopLogger struct{}
+
+func (*NopLogger) Debug(format string, args ...any) {}
+func (*NopLogger) Info(format string, args ...any)  {}
+func (*NopLogger) Warn(format string, args ...any)  {}
+func (*NopLogger) Error(format string, args ...any) {}
+func (*NopLogger) Fatal(format string, args ...any) {}
+
+// NopMetrics 空指标收集器实现
+type NopMetrics struct{}
+
+func (*NopMetrics) RecordHTTPRequest(duration time.Duration)     {}
+func (*NopMetrics) RecordHTTPError()                             {}
+func (*NopMetrics) RecordCacheHit()                              {}
+func (*NopMetrics) RecordCacheMiss()                             {}
+func (*NopMetrics) RecordToolValidation(duration time.Duration)  {}
+func (*NopMetrics) RecordAccountPoolWait(duration time.Duration) {}
+func (*NopMetrics) RecordAccountPoolError()                      {}
+func (*NopMetrics) UpdateSystemMetrics()                         {}
+func (*NopMetrics) ResetWindow()                                 {}
+func (*NopMetrics) GetQPS() float64                              { return 0 }
+func (*NopMetrics) GetMetricsString() string                     { return "" }
+
 // ==================== 编译时接口实现验证 ====================
 // 确保具体类型正确实现了接口
 
 var (
 	_ Logger           = (*AppLogger)(nil)
+	_ Logger           = (*NopLogger)(nil)
 	_ Cache            = (*LRUCache)(nil)
 	_ Cache            = (*CacheService)(nil)
 	_ StorageInterface = (*FileStorage)(nil)
 	_ StorageInterface = (*RedisStorage)(nil)
 	_ AccountManager   = (*PooledAccountManager)(nil)
 	_ MetricsCollector = (*MetricsService)(nil)
+	_ MetricsCollector = (*NopMetrics)(nil)
 )
