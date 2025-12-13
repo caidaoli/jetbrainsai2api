@@ -285,7 +285,7 @@ func parseJetbrainsNonStreamResponse(body []byte, model string) (*ChatCompletion
 
 // generateResponseID 生成响应 ID (KISS: 简单的 ID 生成)
 func generateResponseID() string {
-	return fmt.Sprintf("%s%d", ResponseIDPrefix, time.Now().UnixNano())
+	return generateID(ResponseIDPrefix)
 }
 
 // estimateTokenCount 估算 token 数量 (KISS: 简单估算)

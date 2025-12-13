@@ -300,14 +300,14 @@ func (cs *CacheService) Set(key string, value any, duration time.Duration) {
 
 // Stop 实现 Cache 接口
 func (cs *CacheService) Stop() {
-	cs.Close()
+	cs.messages.Stop()
+	cs.tools.Stop()
+	cs.quota.Stop()
 }
 
 // Close 优雅关闭所有缓存
 func (cs *CacheService) Close() error {
-	cs.messages.Stop()
-	cs.tools.Stop()
-	cs.quota.Stop()
+	cs.Stop()
 	return nil
 }
 

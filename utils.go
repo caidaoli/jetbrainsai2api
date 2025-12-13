@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -128,6 +129,11 @@ func truncateString(s string, prefixLen, suffixLen int, replacement string) stri
 		return s[:prefixLen] + replacement + s[len(s)-suffixLen:]
 	}
 	return s
+}
+
+// generateID 生成带前缀的唯一ID（基于纳秒时间戳）
+func generateID(prefix string) string {
+	return fmt.Sprintf("%s%d", prefix, time.Now().UnixNano())
 }
 
 // getTokenDisplayName 获取账户的显示名称（用于日志）

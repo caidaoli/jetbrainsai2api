@@ -199,8 +199,7 @@ var defaultLogger = NewAppLoggerWithConfig(os.Stdout, isDebugMode())
 
 // isDebugMode 检查是否为调试模式
 func isDebugMode() bool {
-	ginMode := os.Getenv("GIN_MODE")
-	return ginMode == "" || ginMode == "debug"
+	return IsDebug()
 }
 
 // ==================== 全局日志函数（向后兼容）====================

@@ -661,9 +661,7 @@ func showStatsPage(c *gin.Context) {
 
 // streamLog 流式日志输出
 func streamLog(c *gin.Context) {
-	c.Header(HeaderContentType, ContentTypeEventStream)
-	c.Header(HeaderCacheControl, CacheControlNoCache)
-	c.Header(HeaderConnection, ConnectionKeepAlive)
+	setStreamingHeaders(c, "")
 
 	// Keep the connection open
 	<-c.Request.Context().Done()
