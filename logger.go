@@ -203,14 +203,6 @@ func isDebugMode() bool {
 	return ginMode == "" || ginMode == "debug"
 }
 
-// CloseLogger 全局日志清理函数，供main.go调用
-func CloseLogger() error {
-	if defaultLogger != nil {
-		return defaultLogger.Close()
-	}
-	return nil
-}
-
 // ==================== 全局日志函数（向后兼容）====================
 // 这些函数用于尚未迁移到依赖注入的辅助模块
 // 新模块请通过构造函数注入 Logger 接口
