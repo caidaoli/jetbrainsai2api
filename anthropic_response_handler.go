@@ -294,22 +294,6 @@ func estimateTokenCount(text string) int {
 	return len(text) / 4
 }
 
-// createJetbrainsStreamRequest 创建 JetBrains API 流式请求 (DRY: 提取公共逻辑)
-func createJetbrainsStreamRequest(payloadBytes []byte, jwt string) (*http.Request, error) {
-	req, err := http.NewRequest(http.MethodPost, JetBrainsChatEndpoint,
-		strings.NewReader(string(payloadBytes)))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set(HeaderAccept, ContentTypeEventStream)
-	req.Header.Set(HeaderContentType, ContentTypeJSON)
-	req.Header.Set(HeaderCacheControl, CacheControlNoCache)
-	setJetbrainsHeaders(req, jwt)
-
-	return req, nil
-}
-
 // parseAndAggregateStreamResponse 解析并聚合流式响应数据
 // 处理 JetBrains API 的流式格式，聚合所有内容片段
 func parseAndAggregateStreamResponse(bodyStr, model string) (*ChatCompletionResponse, error) {
