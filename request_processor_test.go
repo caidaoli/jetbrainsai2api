@@ -7,42 +7,11 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// mockMetricsCollector 测试用的 MetricsCollector 实现
-type mockMetricsCollector struct{}
-
-func (m *mockMetricsCollector) RecordCacheHit()                             {}
-func (m *mockMetricsCollector) RecordCacheMiss()                            {}
-func (m *mockMetricsCollector) RecordToolValidation(duration time.Duration) {}
-func (m *mockMetricsCollector) RecordRequest(success bool, responseTime int64, model, account string) {
-}
-func (m *mockMetricsCollector) RecordHTTPRequest(duration time.Duration)     {}
-func (m *mockMetricsCollector) RecordHTTPError()                             {}
-func (m *mockMetricsCollector) RecordAccountPoolWait(duration time.Duration) {}
-func (m *mockMetricsCollector) RecordAccountPoolError()                      {}
-func (m *mockMetricsCollector) UpdateSystemMetrics()                         {}
-func (m *mockMetricsCollector) ResetWindow()                                 {}
-func (m *mockMetricsCollector) GetQPS() float64                              { return 0 }
-func (m *mockMetricsCollector) GetMetricsString() string                     { return "" }
-
-func newMockMetrics() MetricsCollector {
-	return &mockMetricsCollector{}
-}
-
-// mockLogger 测试用的 Logger 实现
-type mockLogger struct{}
-
-func (m *mockLogger) Debug(format string, args ...any) {}
-func (m *mockLogger) Info(format string, args ...any)  {}
-func (m *mockLogger) Warn(format string, args ...any)  {}
-func (m *mockLogger) Error(format string, args ...any) {}
-func (m *mockLogger) Fatal(format string, args ...any) {}
-
-func newMockLogger() Logger {
-	return &mockLogger{}
-}
+// 使用 interfaces.go 中定义的 NopLogger 和 NopMetrics
+// 避免重复定义 mock 实现，符合 DRY 原则
 
 func TestRequestProcessor_ProcessMessages(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), &NopMetrics{}, &NopLogger{})
 
 	tests := []struct {
 		name           string
@@ -105,7 +74,7 @@ func TestRequestProcessor_ProcessMessages(t *testing.T) {
 }
 
 func TestRequestProcessor_ProcessTools_NoTools(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), &NopMetrics{}, &NopLogger{})
 
 	request := &ChatCompletionRequest{
 		Model:    "gpt-4",
@@ -129,7 +98,7 @@ func TestRequestProcessor_ProcessTools_NoTools(t *testing.T) {
 }
 
 func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), &NopMetrics{}, &NopLogger{})
 
 	request := &ChatCompletionRequest{
 		Model:    "gpt-4",
@@ -175,7 +144,7 @@ func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
 }
 
 func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), &NopMetrics{}, &NopLogger{})
 
 	request := &ChatCompletionRequest{
 		Model: "gpt-4",
@@ -216,7 +185,7 @@ func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
 }
 
 func TestRequestProcessor_ProcessMessages_WithImageContent(t *testing.T) {
-	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), newMockMetrics(), newMockLogger())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, NewCache(), &NopMetrics{}, &NopLogger{})
 
 	messages := []ChatMessage{
 		{
@@ -254,7 +223,7 @@ func TestRequestProcessor_ProcessMessages_WithImageContent(t *testing.T) {
 func TestRequestProcessor_ProcessTools_Caching(t *testing.T) {
 	// 使用新的缓存实例进行测试
 	testCache := NewCache()
-	processor := NewRequestProcessor(ModelsConfig{}, nil, testCache, newMockMetrics(), newMockLogger())
+	processor := NewRequestProcessor(ModelsConfig{}, nil, testCache, &NopMetrics{}, &NopLogger{})
 
 	request := &ChatCompletionRequest{
 		Model: "gpt-4",
