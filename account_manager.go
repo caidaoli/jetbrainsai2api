@@ -89,7 +89,6 @@ func (am *PooledAccountManager) AcquireAccount(ctx context.Context) (*JetbrainsA
 	return nil, fmt.Errorf("failed to acquire account after trying %d accounts: all accounts unavailable", len(triedAccounts))
 }
 
-
 // tryAcquireOnce 尝试获取一个账户（单次尝试）
 // 返回值：(account, nil) 成功，(nil, error) 失败且应终止，(nil, nil) 需要重试
 func (am *PooledAccountManager) tryAcquireOnce(

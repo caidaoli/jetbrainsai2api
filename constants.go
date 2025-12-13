@@ -85,9 +85,6 @@ const (
 	// MetricsWindowDuration 性能监控窗口时长
 	MetricsWindowDuration = 5 * time.Minute
 
-	// QPSCalculationWindow QPS计算窗口（1分钟）
-	QPSCalculationWindow = 1 * time.Minute
-
 	// QPSCalculationSeconds QPS计算窗口秒数
 	QPSCalculationSeconds = 60.0
 )
@@ -95,9 +92,6 @@ const (
 // ==================== 账户管理常量 ====================
 
 const (
-	// AccountAcquireMaxRetries 获取账户最大重试次数
-	AccountAcquireMaxRetries = 3
-
 	// AccountAcquireTimeout 获取账户超时时间
 	AccountAcquireTimeout = 60 * time.Second
 
@@ -508,12 +502,6 @@ const (
 const (
 	// ToolChoiceAny 强制使用任意工具
 	ToolChoiceAny = "any"
-
-	// ToolChoiceAuto 自动选择工具
-	ToolChoiceAuto = "auto"
-
-	// ToolChoiceNone 不使用工具
-	ToolChoiceNone = "none"
 )
 
 // ==================== SSE 流结束标记常量 ====================
