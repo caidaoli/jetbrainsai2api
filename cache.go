@@ -339,20 +339,6 @@ func generateToolsCacheKey(tools []Tool) string {
 	return fmt.Sprintf("tools:%s:%s", CacheKeyVersion, hex.EncodeToString(h.Sum(nil)))
 }
 
-// generateParamsCacheKey creates a cache key from parameter schemas
-// 包含版本号前缀，避免格式变更导致的缓存污染
-func generateParamsCacheKey(params map[string]any) string {
-	// 使用 Sonic 快速序列化
-	data, err := marshalJSON(params)
-	if err != nil {
-		Warn("Failed to marshal params for cache key: %v", err)
-		// 降级：使用空数据生成缓存键，避免缓存污染
-		data = []byte("{}")
-	}
-	hash := sha1.Sum(data)
-	return fmt.Sprintf("params:%s:%s", CacheKeyVersion, hex.EncodeToString(hash[:]))
-}
-
 // generateQuotaCacheKey creates a cache key for quota data
 // 包含版本号前缀，避免格式变更导致的缓存污染
 func generateQuotaCacheKey(account *JetbrainsAccount) string {
