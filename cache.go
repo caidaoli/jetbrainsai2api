@@ -200,42 +200,6 @@ func NewCacheService() *CacheService {
 	}
 }
 
-// GetMessageCache 获取消息转换缓存
-func (cs *CacheService) GetMessageCache(key string) (any, bool) {
-	cached, found := cs.messages.Get(key)
-	if !found {
-		return nil, false
-	}
-
-	// 性能优化：消息数据是只读的，不需要深拷贝
-	// 消息在被缓存后不会被修改，直接返回指针即可
-	return cached, true
-}
-
-// SetMessageCache 设置消息转换缓存
-// 性能优化：消息数据在缓存后是只读的，无需深拷贝
-func (cs *CacheService) SetMessageCache(key string, value any, duration time.Duration) {
-	cs.messages.Set(key, value, duration)
-}
-
-// GetToolCache 获取工具验证缓存
-func (cs *CacheService) GetToolCache(key string) (any, bool) {
-	cached, found := cs.tools.Get(key)
-	if !found {
-		return nil, false
-	}
-
-	// 性能优化：工具数据是只读的，不需要深拷贝
-	// 工具在被缓存后不会被修改，直接返回指针即可
-	return cached, true
-}
-
-// SetToolCache 设置工具验证缓存
-// 性能优化：工具数据在缓存后是只读的，无需深拷贝
-func (cs *CacheService) SetToolCache(key string, value any, duration time.Duration) {
-	cs.tools.Set(key, value, duration)
-}
-
 // GetQuotaCache 获取配额缓存 (修复 TOCTOU 竞态条件 - 返回深拷贝)
 // 注意：配额数据需要深拷贝，因为可能被外部修改（如更新 HasQuota 字段）
 func (cs *CacheService) GetQuotaCache(key string) (*JetbrainsQuotaResponse, bool) {
@@ -320,25 +284,6 @@ func (cs *CacheService) DeleteQuotaCache(key string) {
 // ClearQuotaCache 清空所有配额缓存
 func (cs *CacheService) ClearQuotaCache() {
 	cs.quota.Clear()
-}
-
-// ClearMessageCache 清空所有消息转换缓存
-func (cs *CacheService) ClearMessageCache() {
-	cs.messages.Clear()
-}
-
-// ClearToolCache 清空所有工具验证缓存
-func (cs *CacheService) ClearToolCache() {
-	cs.tools.Clear()
-}
-
-// ClearAll 清空所有缓存
-// 用于配置变更或需要完全重置缓存状态时
-func (cs *CacheService) ClearAll() {
-	cs.ClearMessageCache()
-	cs.ClearToolCache()
-	cs.ClearQuotaCache()
-	Info("All caches cleared")
 }
 
 // Get 实现 Cache 接口（统一获取方法，默认使用 messages 缓存）
