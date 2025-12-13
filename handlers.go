@@ -56,7 +56,14 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	messagesResult := s.requestProcessor.ProcessMessages(request.Messages)
 	jetbrainsMessages := messagesResult.JetbrainsMessages
 
-	// 步骤 2: 处理工具验证和转换（使用缓存）
+	// 步骤 2: 强制工具使用（如果提供了工具但未指定 tool_choice）
+	// 显式设置，避免在 ProcessTools 中产生副作用
+	if len(request.Tools) > 0 && request.ToolChoice == nil {
+		request.ToolChoice = ToolChoiceAny
+		s.config.Logger.Debug("Setting tool_choice to '%s' for tool usage guarantee", ToolChoiceAny)
+	}
+
+	// 步骤 3: 处理工具验证和转换（使用缓存）
 	// SRP: 职责分离 - 工具处理由 RequestProcessor 负责
 	toolsResult := s.requestProcessor.ProcessTools(&request)
 	if toolsResult.Error != nil {
@@ -65,7 +72,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 		return
 	}
 
-	// 步骤 3: 构建 JetBrains API payload
+	// 步骤 4: 构建 JetBrains API payload
 	// SRP: 职责分离 - payload 构建由 RequestProcessor 负责
 	payloadBytes, err := s.requestProcessor.BuildJetbrainsPayload(&request, jetbrainsMessages, toolsResult.Data)
 	if err != nil {
@@ -74,7 +81,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 		return
 	}
 
-	// 步骤 4: 发送上游请求
+	// 步骤 5: 发送上游请求
 	// SRP: 职责分离 - HTTP 请求发送由 RequestProcessor 负责
 	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, account)
 	if err != nil {
@@ -84,7 +91,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	// 步骤 5: 检查响应状态
+	// 步骤 6: 检查响应状态
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
 		errorMsg := string(body)

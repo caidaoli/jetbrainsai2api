@@ -170,10 +170,8 @@ func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
 		t.Errorf("期望2个数据项，实际 %d 个", len(result.Data))
 	}
 
-	// 检查是否强制设置了 tool_choice
-	if request.ToolChoice == nil {
-		t.Error("应该强制设置 tool_choice 为 'any'")
-	}
+	// 注意：ToolChoice 的设置已移到 handler 层（职责分离）
+	// ProcessTools 不再修改传入的 request 参数
 }
 
 func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {

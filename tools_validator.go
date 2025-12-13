@@ -37,7 +37,7 @@ var (
 
 // ValidateAndTransformToolsWithMetrics 验证并转换工具定义（带指标收集）
 // 这是推荐的新版本，完全消除对全局变量的依赖
-func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics MetricsCollector) ([]Tool, error) {
+func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics MetricsCollector, logger Logger) ([]Tool, error) {
 	if len(tools) == 0 {
 		return tools, nil
 	}
@@ -51,7 +51,7 @@ func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics Met
 			return validatedTools, nil
 		}
 		// 缓存格式错误，视为缓存失效
-		Warn("Cache format mismatch for tools validation (key: %s), revalidating", cacheKey[:16])
+		logger.Warn("Cache format mismatch for tools validation (key: %s), revalidating", truncateCacheKey(cacheKey, 16))
 	}
 
 	// 缓存未命中或格式错误
@@ -62,14 +62,14 @@ func ValidateAndTransformToolsWithMetrics(tools []Tool, cache Cache, metrics Met
 	for _, tool := range tools {
 		// 验证工具名称
 		if !isValidParamName(tool.Function.Name) {
-			Debug("Invalid tool name: %s, skipping tool", tool.Function.Name)
+			logger.Debug("Invalid tool name: %s, skipping tool", tool.Function.Name)
 			continue
 		}
 
 		// 转换参数 Schema
 		transformedParams, err := transformParameters(tool.Function.Parameters)
 		if err != nil {
-			Debug("Failed to transform tool %s parameters: %v", tool.Function.Name, err)
+			logger.Debug("Failed to transform tool %s parameters: %v", tool.Function.Name, err)
 			continue
 		}
 
@@ -246,8 +246,6 @@ func transformPropertySchema(schema any, depth int) (map[string]any, error) {
 
 // simplifyUnionType 简化联合类型（anyOf/oneOf/allOf）为 string
 func simplifyUnionType(schemaMap map[string]any, unionType string) map[string]any {
-	Debug("Simplifying %s schema to string for JetBrains compatibility", unionType)
-
 	result := map[string]any{"type": SchemaTypeString}
 
 	// 尝试从原 Schema 提取描述
@@ -429,4 +427,12 @@ func validateToolCallResponse(tc ToolCall) error {
 		}
 	}
 	return nil
+}
+
+// truncateCacheKey 安全地截取缓存键用于日志显示
+func truncateCacheKey(key string, maxLen int) string {
+	if len(key) <= maxLen {
+		return key
+	}
+	return key[:maxLen]
 }

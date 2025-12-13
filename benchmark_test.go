@@ -70,6 +70,7 @@ func BenchmarkMessageConversionParallel(b *testing.B) {
 func BenchmarkToolsValidation(b *testing.B) {
 	cache := NewCacheService()
 	metrics := newMockMetrics()
+	logger := &nopLogger{}
 	tools := []Tool{
 		{
 			Type: ToolTypeFunction,
@@ -96,7 +97,7 @@ func BenchmarkToolsValidation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ValidateAndTransformToolsWithMetrics(tools, cache, metrics)
+		ValidateAndTransformToolsWithMetrics(tools, cache, metrics, logger)
 	}
 }
 

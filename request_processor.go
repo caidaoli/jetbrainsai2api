@@ -52,7 +52,7 @@ func (p *RequestProcessor) ProcessMessages(messages []ChatMessage) ProcessMessag
 			}
 		}
 		// 缓存格式错误，视为缓存失效，记录警告并重新生成
-		p.logger.Warn("Cache format mismatch for messages (key: %s), regenerating", cacheKey[:16])
+		p.logger.Warn("Cache format mismatch for messages (key: %s), regenerating", truncateCacheKey(cacheKey, 16))
 	}
 
 	// 缓存未命中或格式错误，执行转换
@@ -85,12 +85,6 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 		}
 	}
 
-	// 强制工具使用（如果提供了工具）
-	if request.ToolChoice == nil {
-		request.ToolChoice = ToolChoiceAny
-		p.logger.Debug("FORCING tool_choice to '%s' for tool usage guarantee", ToolChoiceAny)
-	}
-
 	// 尝试从缓存获取验证结果（使用注入的 cache 而非全局变量）
 	toolsCacheKey := generateToolsCacheKey(request.Tools)
 	if cachedAny, found := p.cache.Get(toolsCacheKey); found {
@@ -104,13 +98,13 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 			}
 		}
 		// 缓存格式错误，视为缓存失效，记录警告并重新验证
-		p.logger.Warn("Cache format mismatch for tools (key: %s), revalidating", toolsCacheKey[:16])
+		p.logger.Warn("Cache format mismatch for tools (key: %s), revalidating", truncateCacheKey(toolsCacheKey, 16))
 	}
 
 	// 缓存未命中或格式错误，执行验证
 	p.metrics.RecordCacheMiss()
 	validationStart := time.Now()
-	validatedTools, err := ValidateAndTransformToolsWithMetrics(request.Tools, p.cache, p.metrics)
+	validatedTools, err := ValidateAndTransformToolsWithMetrics(request.Tools, p.cache, p.metrics, p.logger)
 	validationDuration := time.Since(validationStart)
 	p.metrics.RecordToolValidation(validationDuration)
 
