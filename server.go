@@ -157,7 +157,7 @@ func createOptimizedHTTPClient(settings HTTPClientSettings) *http.Client {
 
 // GetModelsConfig 加载模型配置（使用新的config.go中的函数）
 func GetModelsConfig(path string) (ModelsData, ModelsConfig, error) {
-	modelsData, err := loadModels()
+	modelsData, err := loadModels(path)
 	if err != nil {
 		return modelsData, ModelsConfig{}, fmt.Errorf("failed to load models: %w", err)
 	}

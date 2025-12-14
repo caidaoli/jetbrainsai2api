@@ -175,10 +175,15 @@ func (c *MessageConverter) convertSystemMessage(msg ChatMessage) []JetbrainsMess
 }
 
 // convertAssistantMessage 转换助手消息
-// 处理文本响应和工具调用
+// 处理文本响应和工具调用（支持多工具调用）
 func (c *MessageConverter) convertAssistantMessage(msg ChatMessage) []JetbrainsMessage {
 	if len(msg.ToolCalls) > 0 {
-		return c.convertAssistantToolCall(msg.ToolCalls[0])
+		// 遍历所有 tool_calls，为每个生成一条 JetbrainsMessage
+		var result []JetbrainsMessage
+		for _, toolCall := range msg.ToolCalls {
+			result = append(result, c.convertAssistantToolCall(toolCall)...)
+		}
+		return result
 	}
 
 	// 文本响应

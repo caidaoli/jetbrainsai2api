@@ -48,12 +48,12 @@ func DefaultHTTPClientSettings() HTTPClientSettings {
 // ==================== 模型配置加载 ====================
 
 // loadModels 加载模型数据（用于API响应）
-func loadModels() (ModelsData, error) {
+func loadModels(path string) (ModelsData, error) {
 	var result ModelsData
 
-	data, err := os.ReadFile(DefaultModelsConfigPath)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return result, fmt.Errorf("failed to read models.json: %w", err)
+		return result, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	var config ModelsConfig
@@ -61,7 +61,7 @@ func loadModels() (ModelsData, error) {
 		// Try old format (string array)
 		var modelIDs []string
 		if err := sonic.Unmarshal(data, &modelIDs); err != nil {
-			return result, fmt.Errorf("failed to parse models.json: %w", err)
+			return result, fmt.Errorf("failed to parse %s: %w", path, err)
 		}
 		// Convert to new format
 		config.Models = make(map[string]string)
@@ -80,7 +80,7 @@ func loadModels() (ModelsData, error) {
 		})
 	}
 
-	Info("Loaded %d models from models.json", len(config.Models))
+	Info("Loaded %d models from %s", len(config.Models), path)
 	return result, nil
 }
 

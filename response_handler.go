@@ -264,6 +264,7 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 	var toolCalls []ToolCall
 	var currentFuncName string
 	var currentFuncArgs string
+	var upstreamFinishReason string // 存储上游的 finish reason
 
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
@@ -321,6 +322,11 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 			}
 			currentFuncArgs += funcArgs
 		case JetBrainsEventTypeFinishMetadata:
+			// 解析上游 finish_reason（与流式处理保持一致）
+			if reason, ok := data["reason"].(string); ok && reason != "" {
+				upstreamFinishReason = reason
+			}
+
 			// 完成工具调用参数收集 - toolCalls已在ToolCall事件中创建
 			if len(toolCalls) > 0 {
 				// 验证最后一个工具调用
@@ -361,10 +367,17 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 		Content: contentBuilder.String(),
 	}
 
+	// 确定 finish reason（与流式处理保持一致）
 	finishReason := FinishReasonStop
+	if upstreamFinishReason != "" {
+		finishReason = mapJetbrainsToOpenAIFinishReason(upstreamFinishReason)
+	} else if len(toolCalls) > 0 {
+		// 兼容：如果有工具调用但没有 reason 字段，默认为 tool_calls
+		finishReason = FinishReasonToolCalls
+	}
+
 	if len(toolCalls) > 0 {
 		message.ToolCalls = toolCalls
-		finishReason = FinishReasonToolCalls
 	}
 
 	response := ChatCompletionResponse{

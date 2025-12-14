@@ -122,8 +122,8 @@ func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
 		if jwtToken != "" {
 			// 直接 append 结构体字面量，避免复制 mutex (go vet 警告)
 			accounts = append(accounts, JetbrainsAccount{
-				LicenseID:      "",     // 无许可证，无法刷新
-				Authorization:  "",     // 无授权，无法刷新
+				LicenseID:      "", // 无许可证，无法刷新
+				Authorization:  "", // 无授权，无法刷新
 				JWT:            jwtToken,
 				LastUpdated:    float64(time.Now().Unix()),
 				HasQuota:       true,

@@ -63,7 +63,17 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 		case RoleAssistant:
 			// 检查是否包含工具调用
 			if hasToolUse(msg.Content) {
-				messageType = JetBrainsMessageTypeAssistantTool
+				// 处理多工具调用：为每个 tool_use 生成一条 JetbrainsMessage
+				toolInfos := extractAllToolUse(msg.Content)
+				for _, toolInfo := range toolInfos {
+					jetbrainsMessages = append(jetbrainsMessages, JetbrainsMessage{
+						Type:     JetBrainsMessageTypeAssistantTool,
+						ID:       toolInfo.ID,
+						ToolName: toolInfo.Name,
+						Content:  "", // tool_use 不需要 content
+					})
+				}
+				continue // 已处理完毕，跳过后续通用逻辑
 			} else {
 				messageType = JetBrainsMessageTypeAssistant
 			}
@@ -78,17 +88,15 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 			Content: extractStringContent(msg.Content),
 		}
 
-		// 如果是工具相关消息，需要添加额外字段
-		if messageType == JetBrainsMessageTypeAssistantTool || messageType == JetBrainsMessageTypeTool {
+		// 如果是 tool_message，需要添加额外字段
+		if messageType == JetBrainsMessageTypeTool {
 			// 从内容中提取工具信息
 			if toolInfo := extractToolInfo(msg.Content); toolInfo != nil {
 				jetbrainsMessage.ID = toolInfo.ID
 				jetbrainsMessage.ToolName = toolInfo.Name
-				if messageType == JetBrainsMessageTypeTool {
-					jetbrainsMessage.Result = toolInfo.Result
-					// tool_message 不需要 content 字段，只需要 result
-					jetbrainsMessage.Content = ""
-				}
+				jetbrainsMessage.Result = toolInfo.Result
+				// tool_message 不需要 content 字段，只需要 result
+				jetbrainsMessage.Content = ""
 			}
 		}
 
@@ -361,4 +369,27 @@ func extractToolInfo(content any) *ToolInfo {
 		}
 	}
 	return nil
+}
+
+// extractAllToolUse 从消息内容中提取所有 tool_use blocks
+// 用于处理包含多个工具调用的 assistant 消息
+func extractAllToolUse(content any) []ToolInfo {
+	var toolInfos []ToolInfo
+	if contentArray, ok := content.([]any); ok {
+		for _, block := range contentArray {
+			if blockMap, ok := block.(map[string]any); ok {
+				if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeToolUse {
+					toolInfo := ToolInfo{}
+					if id, ok := blockMap["id"].(string); ok {
+						toolInfo.ID = id
+					}
+					if name, ok := blockMap["name"].(string); ok {
+						toolInfo.Name = name
+					}
+					toolInfos = append(toolInfos, toolInfo)
+				}
+			}
+		}
+	}
+	return toolInfos
 }
