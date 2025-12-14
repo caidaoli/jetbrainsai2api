@@ -117,6 +117,7 @@ func recordSuccessWithMetrics(metrics *MetricsService, startTime time.Time, mode
 // recordFailureWithMetrics 记录失败的请求（使用注入的 MetricsService）
 func recordFailureWithMetrics(metrics *MetricsService, startTime time.Time, model, account string) {
 	metrics.RecordRequest(false, time.Since(startTime).Milliseconds(), model, account)
+	metrics.RecordHTTPError()
 }
 
 // ============================================================================

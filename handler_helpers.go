@@ -74,7 +74,6 @@ func recordRequestResultWithMetrics(metrics *MetricsService, success bool, start
 		recordSuccessWithMetrics(metrics, startTime, model, account)
 	} else {
 		recordFailureWithMetrics(metrics, startTime, model, account)
-		metrics.RecordHTTPError()
 	}
 }
 
@@ -119,7 +118,6 @@ func withPanicRecoveryWithMetrics(
 			}
 
 			recordFailureWithMetrics(metrics, startTime, "", "")
-			metrics.RecordHTTPError()
 
 			// 根据错误格式返回不同的响应
 			if errorFormat == APIFormatAnthropic {

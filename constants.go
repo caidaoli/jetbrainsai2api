@@ -79,12 +79,6 @@ const (
 	// HistoryFlushInterval 历史记录刷新间隔
 	HistoryFlushInterval = 100 * time.Millisecond
 
-	// MetricsMonitorInterval 性能监控间隔
-	MetricsMonitorInterval = 30 * time.Second
-
-	// MetricsWindowDuration 性能监控窗口时长
-	MetricsWindowDuration = 5 * time.Minute
-
 	// QPSCalculationSeconds QPS计算窗口秒数
 	QPSCalculationSeconds = 60.0
 )
@@ -217,9 +211,6 @@ const (
 
 	// DefaultGinMode 默认Gin运行模式
 	DefaultGinMode = "release"
-
-	// GinModeDebug Gin调试模式
-	GinModeDebug = "debug"
 
 	// DefaultModelsConfigPath 默认模型配置文件路径
 	DefaultModelsConfigPath = "models.json"

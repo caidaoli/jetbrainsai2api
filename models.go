@@ -173,21 +173,14 @@ type StreamResponse struct {
 
 // JetbrainsMessage updated to support v8 API format including tool calls
 type JetbrainsMessage struct {
-	Type         string                 `json:"type"`
-	Content      string                 `json:"content,omitempty"`
-	MediaType    string                 `json:"mediaType,omitempty"` // New field for v8 image support
-	Data         string                 `json:"data,omitempty"`      // New field for v8 image data
-	FunctionCall *JetbrainsFunctionCall `json:"functionCall,omitempty"`
-	FunctionName string                 `json:"functionName,omitempty"`
-	// New fields for v8 tool calls
+	Type      string `json:"type"`
+	Content   string `json:"content,omitempty"`
+	MediaType string `json:"mediaType,omitempty"` // New field for v8 image support
+	Data      string `json:"data,omitempty"`      // New field for v8 image data
+	// Tool call fields
 	ID       string `json:"id,omitempty"`       // Tool call ID
 	ToolName string `json:"toolName,omitempty"` // Tool name
 	Result   string `json:"result,omitempty"`   // Tool result
-}
-
-type JetbrainsFunctionCall struct {
-	FunctionName string `json:"functionName"`
-	Content      string `json:"content"`
 }
 
 type JetbrainsPayload struct {
@@ -225,15 +218,6 @@ type AnthropicContentBlock struct {
 	ID    string         `json:"id,omitempty"`
 	Name  string         `json:"name,omitempty"`
 	Input map[string]any `json:"input,omitempty"`
-	// 支持图像和其他内容类型
-	Source *AnthropicImageSource `json:"source,omitempty"`
-}
-
-type AnthropicImageSource struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type,omitempty"`
-	Data      string `json:"data,omitempty"`
-	URL       string `json:"url,omitempty"`
 }
 
 // FlexibleString 支持字符串或数组形式的system字段

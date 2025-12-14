@@ -207,15 +207,8 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client, cache *Cac
 }
 
 // getQuotaDataDirect 直接从 JetBrains API 获取配额数据（不使用全局缓存）
+// 注意: 调用者 (getQuotaData) 已确保 JWT 有效，此处无需重复检查
 func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*JetbrainsQuotaResponse, error) {
-	if err := ensureValidJWT(account, httpClient); err != nil {
-		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
-	}
-
-	if account.JWT == "" {
-		return nil, fmt.Errorf("account has no JWT")
-	}
-
 	req, err := http.NewRequest(http.MethodPost, JetBrainsQuotaEndpoint, nil)
 	if err != nil {
 		return nil, err

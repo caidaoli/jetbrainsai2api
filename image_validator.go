@@ -8,16 +8,13 @@ import (
 
 // ImageValidator provides image validation functionality for JetBrains AI API v8
 type ImageValidator struct {
-	MaxSizeBytes     int64
-	SupportedFormats []string
+	// Empty struct - uses constants directly
+	// Kept as struct for interface consistency with existing code
 }
 
 // NewImageValidator creates a new image validator with default settings
 func NewImageValidator() *ImageValidator {
-	return &ImageValidator{
-		MaxSizeBytes:     MaxImageSizeBytes,
-		SupportedFormats: SupportedImageFormats,
-	}
+	return &ImageValidator{}
 }
 
 // ValidateImageData validates base64 encoded image data
@@ -25,7 +22,7 @@ func (v *ImageValidator) ValidateImageData(mediaType, data string) error {
 	// Check if media type is supported
 	if !v.isFormatSupported(mediaType) {
 		return fmt.Errorf("unsupported image format: %s. Supported formats: %v",
-			mediaType, v.SupportedFormats)
+			mediaType, SupportedImageFormats)
 	}
 
 	// Decode base64 to check size
@@ -35,9 +32,9 @@ func (v *ImageValidator) ValidateImageData(mediaType, data string) error {
 	}
 
 	// Check file size
-	if int64(len(decoded)) > v.MaxSizeBytes {
+	if int64(len(decoded)) > MaxImageSizeBytes {
 		return fmt.Errorf("image size %d bytes exceeds maximum allowed size %d bytes",
-			len(decoded), v.MaxSizeBytes)
+			len(decoded), MaxImageSizeBytes)
 	}
 
 	return nil
@@ -45,7 +42,7 @@ func (v *ImageValidator) ValidateImageData(mediaType, data string) error {
 
 // isFormatSupported checks if the given media type is supported
 func (v *ImageValidator) isFormatSupported(mediaType string) bool {
-	for _, format := range v.SupportedFormats {
+	for _, format := range SupportedImageFormats {
 		if strings.EqualFold(format, mediaType) {
 			return true
 		}

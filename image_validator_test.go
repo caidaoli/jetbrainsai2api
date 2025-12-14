@@ -14,13 +14,13 @@ func TestNewImageValidator(t *testing.T) {
 		t.Fatal("NewImageValidator 不应返回 nil")
 	}
 
-	if validator.MaxSizeBytes != MaxImageSizeBytes {
-		t.Errorf("MaxSizeBytes 错误，期望 %d，实际 %d",
-			MaxImageSizeBytes, validator.MaxSizeBytes)
+	// 验证常量配置正确 (不再是结构体字段，而是直接使用全局常量)
+	if MaxImageSizeBytes <= 0 {
+		t.Error("MaxImageSizeBytes 常量应大于0")
 	}
 
-	if len(validator.SupportedFormats) == 0 {
-		t.Error("SupportedFormats 不应为空")
+	if len(SupportedImageFormats) == 0 {
+		t.Error("SupportedImageFormats 常量不应为空")
 	}
 }
 
