@@ -61,6 +61,36 @@ func ensureValidJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	return nil
 }
 
+// parseJWTExpiry 从 JWT 字符串中解析过期时间
+// 用于静态 JWT 加载时设置过期时间
+func parseJWTExpiry(tokenStr string) (time.Time, error) {
+	// 验证 JWT 格式（三段式结构）
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
+	}
+
+	// SECURITY NOTE: 使用 ParseUnverified 是安全的，因为：
+	// 1. 我们只读取 exp (过期时间) 字段用于本地提示
+	// 2. 实际的 JWT 验证由 JetBrains API 在使用时完成
+	token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not parse JWT: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return time.Time{}, fmt.Errorf("invalid JWT claims format")
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return time.Time{}, fmt.Errorf("JWT missing exp claim")
+	}
+
+	return time.Unix(int64(exp), 0), nil
+}
+
 // refreshJetbrainsJWT refreshes the JWT for a given JetBrains account
 func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) error {
 	Info("Refreshing JWT for licenseId %s...", account.LicenseID)

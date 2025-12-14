@@ -118,16 +118,29 @@ func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
 
 	// 方式2：静态JWT模式（不推荐，JWT会过期且无法自动刷新）
 	jwts := parseEnvList(os.Getenv("JETBRAINS_JWTS"))
-	for _, jwt := range jwts {
-		if jwt != "" {
+	for i, jwtToken := range jwts {
+		if jwtToken != "" {
+			// 直接 append 结构体字面量，避免复制 mutex (go vet 警告)
 			accounts = append(accounts, JetbrainsAccount{
-				LicenseID:      "",            // 无许可证，无法刷新
-				Authorization:  "",            // 无授权，无法刷新
-				JWT:            jwt,           // 直接使用静态JWT
+				LicenseID:      "",     // 无许可证，无法刷新
+				Authorization:  "",     // 无授权，无法刷新
+				JWT:            jwtToken,
 				LastUpdated:    float64(time.Now().Unix()),
 				HasQuota:       true,
 				LastQuotaCheck: 0,
 			})
+
+			// 解析 JWT 过期时间，修改切片中最后一个元素
+			if expiry, err := parseJWTExpiry(jwtToken); err != nil {
+				log.Printf("[WARN] 静态JWT #%d 解析失败: %v", i+1, err)
+			} else {
+				accounts[len(accounts)-1].ExpiryTime = expiry
+				if time.Now().After(expiry) {
+					log.Printf("[WARN] 静态JWT #%d 已过期 (过期时间: %s)", i+1, expiry.Format(time.RFC3339))
+				} else {
+					log.Printf("[INFO] 静态JWT #%d 将于 %s 过期", i+1, expiry.Format(time.RFC3339))
+				}
+			}
 		}
 	}
 
