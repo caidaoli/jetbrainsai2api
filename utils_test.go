@@ -654,7 +654,7 @@ func TestGetTokenInfoFromAccount_UsageCalculation(t *testing.T) {
 			}
 			// 使用近似比较（避免浮点精度问题）
 			const epsilon = 0.0001
-			if (usageRate - tt.expectedUsageRate) > epsilon || (tt.expectedUsageRate - usageRate) > epsilon {
+			if (usageRate-tt.expectedUsageRate) > epsilon || (tt.expectedUsageRate-usageRate) > epsilon {
 				t.Errorf("期望 usageRate %.2f%%，实际 %.2f%%", tt.expectedUsageRate, usageRate)
 			}
 		})

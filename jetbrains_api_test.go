@@ -207,3 +207,367 @@ func timesEqual(t1, t2 time.Time, tolerance time.Duration) bool {
 	}
 	return diff <= tolerance
 }
+
+// TestProcessQuotaData 测试配额数据处理函数
+func TestProcessQuotaData(t *testing.T) {
+	tests := []struct {
+		name           string
+		quotaData      *JetbrainsQuotaResponse
+		initialAccount *JetbrainsAccount
+		expectHasQuota bool
+		description    string
+	}{
+		{
+			name: "正常配额-有剩余",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "50.5"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-1",
+				HasQuota:  false,
+			},
+			expectHasQuota: true,
+			description:    "使用量 50.5 < 最大值 100.0，应该有配额",
+		},
+		{
+			name: "配额耗尽-相等",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-2",
+				HasQuota:  true,
+			},
+			expectHasQuota: false,
+			description:    "使用量 100.0 = 最大值 100.0，应该无配额",
+		},
+		{
+			name: "配额超额",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "150.0"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-3",
+				HasQuota:  true,
+			},
+			expectHasQuota: false,
+			description:    "使用量 150.0 > 最大值 100.0，应该无配额",
+		},
+		{
+			name: "边界值-零使用量",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "0"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-4",
+				HasQuota:  false,
+			},
+			expectHasQuota: true,
+			description:    "使用量为 0，应该有配额",
+		},
+		{
+			name: "边界值-零最大配额",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "0"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-5",
+				HasQuota:  true,
+			},
+			expectHasQuota: true,
+			description:    "最大配额为 0 时防止除零错误，容错值设为 1，使用量 0 < 1，应该有配额",
+		},
+		{
+			name: "无效数据-空字符串",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: ""},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: ""},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-6",
+				HasQuota:  true,
+			},
+			expectHasQuota: true,
+			description:    "空字符串解析为 0，最大值容错为 1，使用量 0 < 1，应该有配额",
+		},
+		{
+			name: "无效数据-非数字字符串",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "invalid"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "not-a-number"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-7",
+				HasQuota:  true,
+			},
+			expectHasQuota: true,
+			description:    "非数字字符串解析失败默认为 0，最大值容错为 1，使用量 0 < 1，应该有配额",
+		},
+		{
+			name: "浮点数精度测试",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "99.9999999"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "test-license-8",
+				HasQuota:  false,
+			},
+			expectHasQuota: true,
+			description:    "浮点数精度测试，99.9999999 < 100.0，应该有配额",
+		},
+		{
+			name: "Premium用户-高配额",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "500.0"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "10000.0"},
+				},
+				Until: "2025-12-31T23:59:59Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "premium-license",
+				HasQuota:  false,
+			},
+			expectHasQuota: true,
+			description:    "Premium 用户高配额测试，500 < 10000，应该有配额",
+		},
+		{
+			name: "非Premium用户-接近配额上限",
+			quotaData: &JetbrainsQuotaResponse{
+				Current: struct {
+					Current struct {
+						Amount string `json:"amount"`
+					} `json:"current"`
+					Maximum struct {
+						Amount string `json:"amount"`
+					} `json:"maximum"`
+				}{
+					Current: struct {
+						Amount string `json:"amount"`
+					}{Amount: "99.0"},
+					Maximum: struct {
+						Amount string `json:"amount"`
+					}{Amount: "100.0"},
+				},
+				Until: "2025-12-15T00:00:00Z",
+			},
+			initialAccount: &JetbrainsAccount{
+				LicenseID: "regular-license",
+				HasQuota:  false,
+			},
+			expectHasQuota: true,
+			description:    "普通用户接近配额上限，99 < 100，应该有配额",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 记录测试前的时间，用于验证 LastQuotaCheck 更新
+			beforeTime := time.Now().Unix()
+
+			// 调用被测函数
+			processQuotaData(tt.quotaData, tt.initialAccount)
+
+			// 记录测试后的时间
+			afterTime := time.Now().Unix()
+
+			// 验证 HasQuota 状态
+			if tt.initialAccount.HasQuota != tt.expectHasQuota {
+				t.Errorf("%s\n期望 HasQuota = %v，实际 = %v",
+					tt.description,
+					tt.expectHasQuota,
+					tt.initialAccount.HasQuota,
+				)
+			}
+
+			// 验证 LastQuotaCheck 已更新
+			if tt.initialAccount.LastQuotaCheck < float64(beforeTime) ||
+				tt.initialAccount.LastQuotaCheck > float64(afterTime) {
+				t.Errorf("LastQuotaCheck 未正确更新\n期望范围: [%d, %d]\n实际: %.0f",
+					beforeTime,
+					afterTime,
+					tt.initialAccount.LastQuotaCheck,
+				)
+			}
+		})
+	}
+}
+
+// TestProcessQuotaData_ConcurrentAccess 测试并发访问场景
+func TestProcessQuotaData_ConcurrentAccess(t *testing.T) {
+	account := &JetbrainsAccount{
+		LicenseID: "concurrent-test",
+		HasQuota:  false,
+	}
+
+	quotaData := &JetbrainsQuotaResponse{
+		Current: struct {
+			Current struct {
+				Amount string `json:"amount"`
+			} `json:"current"`
+			Maximum struct {
+				Amount string `json:"amount"`
+			} `json:"maximum"`
+		}{
+			Current: struct {
+				Amount string `json:"amount"`
+			}{Amount: "50.0"},
+			Maximum: struct {
+				Amount string `json:"amount"`
+			}{Amount: "100.0"},
+		},
+		Until: "2025-12-15T00:00:00Z",
+	}
+
+	// 并发调用 processQuotaData
+	done := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go func() {
+			processQuotaData(quotaData, account)
+			done <- true
+		}()
+	}
+
+	// 等待所有 goroutine 完成
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// 验证最终状态一致
+	if !account.HasQuota {
+		t.Errorf("并发调用后 HasQuota 应该为 true")
+	}
+
+	if account.LastQuotaCheck == 0 {
+		t.Errorf("并发调用后 LastQuotaCheck 应该被更新")
+	}
+}
