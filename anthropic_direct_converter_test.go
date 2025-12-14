@@ -1,0 +1,295 @@
+package main
+
+import (
+	"testing"
+)
+
+// TestExtractAllToolUse 测试从消息内容中提取所有 tool_use blocks
+func TestExtractAllToolUse(t *testing.T) {
+	tests := []struct {
+		name              string
+		content           any
+		expectedCount     int
+		expectedToolNames []string
+		expectedToolIDs   []string
+	}{
+		{
+			name:          "空内容",
+			content:       nil,
+			expectedCount: 0,
+		},
+		{
+			name:          "字符串内容（无工具调用）",
+			content:       "普通文本消息",
+			expectedCount: 0,
+		},
+		{
+			name: "单个 tool_use",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_01ABC",
+					"name": "get_weather",
+				},
+			},
+			expectedCount:     1,
+			expectedToolNames: []string{"get_weather"},
+			expectedToolIDs:   []string{"toolu_01ABC"},
+		},
+		{
+			name: "两个 tool_use",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_01ABC",
+					"name": "get_weather",
+				},
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_02DEF",
+					"name": "get_time",
+				},
+			},
+			expectedCount:     2,
+			expectedToolNames: []string{"get_weather", "get_time"},
+			expectedToolIDs:   []string{"toolu_01ABC", "toolu_02DEF"},
+		},
+		{
+			name: "三个 tool_use",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_01",
+					"name": "read_file",
+				},
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_02",
+					"name": "write_file",
+				},
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_03",
+					"name": "execute_command",
+				},
+			},
+			expectedCount:     3,
+			expectedToolNames: []string{"read_file", "write_file", "execute_command"},
+			expectedToolIDs:   []string{"toolu_01", "toolu_02", "toolu_03"},
+		},
+		{
+			name: "混合内容（text + tool_use）",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "让我调用两个工具",
+				},
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_01ABC",
+					"name": "tool_a",
+				},
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_02DEF",
+					"name": "tool_b",
+				},
+			},
+			expectedCount:     2,
+			expectedToolNames: []string{"tool_a", "tool_b"},
+			expectedToolIDs:   []string{"toolu_01ABC", "toolu_02DEF"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractAllToolUse(tt.content)
+
+			if len(result) != tt.expectedCount {
+				t.Errorf("期望提取 %d 个工具调用，实际提取 %d 个", tt.expectedCount, len(result))
+				return
+			}
+
+			for i := 0; i < len(result); i++ {
+				if result[i].Name != tt.expectedToolNames[i] {
+					t.Errorf("工具 %d 名称错误，期望 '%s'，实际 '%s'",
+						i, tt.expectedToolNames[i], result[i].Name)
+				}
+				if result[i].ID != tt.expectedToolIDs[i] {
+					t.Errorf("工具 %d ID错误，期望 '%s'，实际 '%s'",
+						i, tt.expectedToolIDs[i], result[i].ID)
+				}
+			}
+		})
+	}
+}
+
+// TestAnthropicToJetbrainsMessages_MultipleToolUse 测试 Anthropic 消息转换多工具调用
+func TestAnthropicToJetbrainsMessages_MultipleToolUse(t *testing.T) {
+	tests := []struct {
+		name              string
+		messages          []AnthropicMessage
+		expectedCount     int
+		expectedTypes     []string
+		expectedToolNames []string
+		expectedToolIDs   []string
+	}{
+		{
+			name: "单个 assistant 消息包含两个 tool_use",
+			messages: []AnthropicMessage{
+				{
+					Role: RoleAssistant,
+					Content: []any{
+						map[string]any{
+							"type": ContentBlockTypeToolUse,
+							"id":   "toolu_01",
+							"name": "get_weather",
+						},
+						map[string]any{
+							"type": ContentBlockTypeToolUse,
+							"id":   "toolu_02",
+							"name": "get_time",
+						},
+					},
+				},
+			},
+			expectedCount:     2,
+			expectedTypes:     []string{JetBrainsMessageTypeAssistantTool, JetBrainsMessageTypeAssistantTool},
+			expectedToolNames: []string{"get_weather", "get_time"},
+			expectedToolIDs:   []string{"toolu_01", "toolu_02"},
+		},
+		{
+			name: "单个 assistant 消息包含三个 tool_use",
+			messages: []AnthropicMessage{
+				{
+					Role: RoleAssistant,
+					Content: []any{
+						map[string]any{
+							"type": ContentBlockTypeToolUse,
+							"id":   "toolu_a",
+							"name": "read_file",
+						},
+						map[string]any{
+							"type": ContentBlockTypeToolUse,
+							"id":   "toolu_b",
+							"name": "write_file",
+						},
+						map[string]any{
+							"type": ContentBlockTypeToolUse,
+							"id":   "toolu_c",
+							"name": "delete_file",
+						},
+					},
+				},
+			},
+			expectedCount:     3,
+			expectedTypes:     []string{JetBrainsMessageTypeAssistantTool, JetBrainsMessageTypeAssistantTool, JetBrainsMessageTypeAssistantTool},
+			expectedToolNames: []string{"read_file", "write_file", "delete_file"},
+			expectedToolIDs:   []string{"toolu_a", "toolu_b", "toolu_c"},
+		},
+		{
+			name: "普通 assistant 文本消息",
+			messages: []AnthropicMessage{
+				{
+					Role:    RoleAssistant,
+					Content: "这是一个普通回复",
+				},
+			},
+			expectedCount:     1,
+			expectedTypes:     []string{JetBrainsMessageTypeAssistant},
+			expectedToolNames: []string{""}, // 无工具调用
+			expectedToolIDs:   []string{""}, // 无工具ID
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := anthropicToJetbrainsMessages(tt.messages)
+
+			if len(result) != tt.expectedCount {
+				t.Errorf("期望生成 %d 个消息，实际生成 %d 个", tt.expectedCount, len(result))
+				return
+			}
+
+			for i := 0; i < len(result); i++ {
+				if result[i].Type != tt.expectedTypes[i] {
+					t.Errorf("消息 %d 类型错误，期望 '%s'，实际 '%s'",
+						i, tt.expectedTypes[i], result[i].Type)
+				}
+				if tt.expectedToolNames[i] != "" && result[i].ToolName != tt.expectedToolNames[i] {
+					t.Errorf("消息 %d 工具名称错误，期望 '%s'，实际 '%s'",
+						i, tt.expectedToolNames[i], result[i].ToolName)
+				}
+				if tt.expectedToolIDs[i] != "" && result[i].ID != tt.expectedToolIDs[i] {
+					t.Errorf("消息 %d 工具ID错误，期望 '%s'，实际 '%s'",
+						i, tt.expectedToolIDs[i], result[i].ID)
+				}
+			}
+		})
+	}
+}
+
+// TestHasToolUse 测试 hasToolUse 函数
+func TestHasToolUse(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  any
+		expected bool
+	}{
+		{
+			name:     "nil 内容",
+			content:  nil,
+			expected: false,
+		},
+		{
+			name:     "字符串内容",
+			content:  "普通文本",
+			expected: false,
+		},
+		{
+			name: "只有 text block",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "文本内容",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "包含 tool_use block",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_01",
+					"name": "test_tool",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "混合 text 和 tool_use",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "先说点什么",
+				},
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_01",
+					"name": "test_tool",
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasToolUse(tt.content)
+			if result != tt.expected {
+				t.Errorf("期望 %v，实际 %v", tt.expected, result)
+			}
+		})
+	}
+}
