@@ -173,13 +173,12 @@ func createLogger() Logger {
 	debugMode := os.Getenv("GIN_MODE") == "debug"
 	output, fileHandle := createDebugFileOutput()
 
-	if fileHandle != nil {
-		// 如果有文件句柄，使用默认构造函数以便自动管理文件生命周期
-		return NewAppLogger()
+	// 直接使用已打开的输出，避免重复打开文件
+	return &AppLogger{
+		logger:     log.New(output, "", log.LstdFlags),
+		debug:      debugMode,
+		fileHandle: fileHandle, // 可能为nil（stdout时）
 	}
-
-	// 使用配置式构造函数
-	return NewAppLoggerWithConfig(output, debugMode)
 }
 
 // ==================== 全局日志实例（简化版）====================

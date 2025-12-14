@@ -127,6 +127,10 @@ const (
 	// MaxResponseBodySize HTTP响应体最大大小（10MB）
 	// 用于防止恶意大响应导致的OOM攻击
 	MaxResponseBodySize = 10 * 1024 * 1024
+
+	// MaxScannerBufferSize SSE流式响应扫描器缓冲区大小（1MB）
+	// 默认64KB不足以处理大型工具调用参数
+	MaxScannerBufferSize = 1024 * 1024
 )
 
 // SupportedImageFormats 支持的图像格式列表

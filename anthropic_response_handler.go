@@ -32,6 +32,8 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 	c.Writer.Flush()
 
 	scanner := bufio.NewScanner(resp.Body)
+	// 增大缓冲区以处理大型工具调用参数（默认64KB不足）
+	scanner.Buffer(make([]byte, MaxScannerBufferSize), MaxScannerBufferSize)
 	var fullContent strings.Builder
 	var hasContent bool
 	lineCount := 0

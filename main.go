@@ -1,7 +1,9 @@
 package main
 
 import (
+	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -82,6 +84,9 @@ func loadServerConfigFromEnv() (ServerConfig, error) {
 
 // loadJetbrainsAccountsFromEnv 从环境变量加载 JetBrains 账户
 func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
+	var accounts []JetbrainsAccount
+
+	// 方式1：许可证模式（推荐，支持自动刷新JWT）
 	licenseIDs := parseEnvList(os.Getenv("JETBRAINS_LICENSE_IDS"))
 	authorizations := parseEnvList(os.Getenv("JETBRAINS_AUTHORIZATIONS"))
 
@@ -98,10 +103,8 @@ func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
 		authorizations = append(authorizations, "")
 	}
 
-	var accounts []JetbrainsAccount
 	for i := 0; i < maxLen; i++ {
 		if licenseIDs[i] != "" && authorizations[i] != "" {
-			// 直接 append 以避免复制 mutex 的警告
 			accounts = append(accounts, JetbrainsAccount{
 				LicenseID:      licenseIDs[i],
 				Authorization:  authorizations[i],
@@ -111,6 +114,25 @@ func loadJetbrainsAccountsFromEnv() []JetbrainsAccount {
 				LastQuotaCheck: 0,
 			})
 		}
+	}
+
+	// 方式2：静态JWT模式（不推荐，JWT会过期且无法自动刷新）
+	jwts := parseEnvList(os.Getenv("JETBRAINS_JWTS"))
+	for _, jwt := range jwts {
+		if jwt != "" {
+			accounts = append(accounts, JetbrainsAccount{
+				LicenseID:      "",            // 无许可证，无法刷新
+				Authorization:  "",            // 无授权，无法刷新
+				JWT:            jwt,           // 直接使用静态JWT
+				LastUpdated:    float64(time.Now().Unix()),
+				HasQuota:       true,
+				LastQuotaCheck: 0,
+			})
+		}
+	}
+
+	if len(jwts) > 0 {
+		log.Printf("[WARN] 使用静态JWT模式，JWT过期后将无法自动刷新，建议使用许可证模式")
 	}
 
 	return accounts

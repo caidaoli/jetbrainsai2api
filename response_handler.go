@@ -44,6 +44,8 @@ func mapJetbrainsToOpenAIFinishReason(jetbrainsReason string) string {
 // Returns error if stream reading fails or context is cancelled.
 func processJetbrainsStream(ctx context.Context, resp *http.Response, logger Logger, onEvent func(event map[string]any) bool) error {
 	scanner := bufio.NewScanner(resp.Body)
+	// 增大缓冲区以处理大型工具调用参数（默认64KB不足）
+	scanner.Buffer(make([]byte, MaxScannerBufferSize), MaxScannerBufferSize)
 	for scanner.Scan() {
 		// 检查 context 是否已取消（客户端断开连接）
 		select {
