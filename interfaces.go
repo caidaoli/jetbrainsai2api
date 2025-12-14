@@ -59,13 +59,8 @@ type MetricsCollector interface {
 	RecordAccountPoolWait(duration time.Duration)
 	RecordAccountPoolError()
 
-	// 系统指标
-	UpdateSystemMetrics()
-	ResetWindow()
-
 	// 查询指标
 	GetQPS() float64
-	GetMetricsString() string
 }
 
 // ==================== Nop 实现（用于测试和默认值） ====================
@@ -89,10 +84,7 @@ func (*NopMetrics) RecordCacheMiss()                             {}
 func (*NopMetrics) RecordToolValidation(duration time.Duration)  {}
 func (*NopMetrics) RecordAccountPoolWait(duration time.Duration) {}
 func (*NopMetrics) RecordAccountPoolError()                      {}
-func (*NopMetrics) UpdateSystemMetrics()                         {}
-func (*NopMetrics) ResetWindow()                                 {}
 func (*NopMetrics) GetQPS() float64                              { return 0 }
-func (*NopMetrics) GetMetricsString() string                     { return "" }
 
 // ==================== 编译时接口实现验证 ====================
 // 确保具体类型正确实现了接口

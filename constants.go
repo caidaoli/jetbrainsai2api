@@ -150,6 +150,9 @@ const (
 
 	// MaxNestingDepth Schema最大嵌套深度
 	MaxNestingDepth = 5
+
+	// MaxPreservedPropertiesInSimplifiedSchema 简化后保留的原始属性数量上限
+	MaxPreservedPropertiesInSimplifiedSchema = 5
 )
 
 // ==================== JSON Schema 类型常量 ====================

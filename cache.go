@@ -186,17 +186,15 @@ func (c *LRUCache) Clear() {
 // CacheService 统一缓存服务
 // SRP: 单一职责 - 只负责缓存管理
 type CacheService struct {
-	messages *LRUCache // 消息转换缓存
-	tools    *LRUCache // 工具验证缓存
-	quota    *LRUCache // 配额缓存 (修复竞态条件)
+	general *LRUCache // 通用缓存（消息转换 + 工具验证，通过键前缀隔离）
+	quota   *LRUCache // 配额缓存（需要深拷贝保护）
 }
 
 // NewCacheService 创建新的缓存服务
 func NewCacheService() *CacheService {
 	return &CacheService{
-		messages: NewCache(),
-		tools:    NewCache(),
-		quota:    NewCache(),
+		general: NewCache(),
+		quota:   NewCache(),
 	}
 }
 
@@ -286,22 +284,21 @@ func (cs *CacheService) ClearQuotaCache() {
 	cs.quota.Clear()
 }
 
-// Get 实现 Cache 接口（统一获取方法，默认使用 messages 缓存）
+// Get 实现 Cache 接口（统一获取方法）
 // 性能优化：缓存数据是只读的，无需深拷贝
 func (cs *CacheService) Get(key string) (any, bool) {
-	return cs.messages.Get(key)
+	return cs.general.Get(key)
 }
 
-// Set 实现 Cache 接口（统一设置方法，默认使用 messages 缓存）
+// Set 实现 Cache 接口（统一设置方法）
 // 性能优化：缓存数据在存储后是只读的，无需深拷贝
 func (cs *CacheService) Set(key string, value any, duration time.Duration) {
-	cs.messages.Set(key, value, duration)
+	cs.general.Set(key, value, duration)
 }
 
 // Stop 实现 Cache 接口
 func (cs *CacheService) Stop() {
-	cs.messages.Stop()
-	cs.tools.Stop()
+	cs.general.Stop()
 	cs.quota.Stop()
 }
 

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -118,4 +121,70 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	} else {
 		handleAnthropicNonStreamingResponseWithMetrics(c, resp, &anthReq, startTime, accountIdentifier, s.metricsService)
 	}
+}
+
+// callJetbrainsAPIDirect 直接调用 JetBrains API
+// KISS: 简化调用链，消除中间转换
+func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbrainsMessages []JetbrainsMessage, data []JetbrainsData, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
+	internalModel := getInternalModelName(s.modelsConfig, anthReq.Model)
+	payload := JetbrainsPayload{
+		Prompt:  JetBrainsChatPrompt,
+		Profile: internalModel,
+		Chat:    JetbrainsChat{Messages: jetbrainsMessages},
+	}
+
+	// 只有当有数据时才设置 Parameters
+	if len(data) > 0 {
+		payload.Parameters = &JetbrainsParameters{Data: data}
+	}
+
+	payloadBytes, err := marshalJSON(payload)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to marshal request")
+	}
+
+	Debug("=== JetBrains API Request Debug (Direct) ===")
+	Debug("Model: %s -> %s", anthReq.Model, internalModel)
+	Debug("Messages converted: %d", len(jetbrainsMessages))
+	Debug("Tools attached: %d", len(data))
+	Debug("Payload size: %d bytes", len(payloadBytes))
+	Debug("=== Complete Upstream Payload ===")
+	Debug("%s", string(payloadBytes))
+	Debug("=== End Upstream Payload ===")
+	Debug("=== End Debug ===")
+
+	req, err := http.NewRequest(http.MethodPost, JetBrainsChatEndpoint, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create request")
+	}
+
+	req.Header.Set(HeaderAccept, ContentTypeEventStream)
+	req.Header.Set(HeaderContentType, ContentTypeJSON)
+	req.Header.Set(HeaderCacheControl, CacheControlNoCache)
+	setJetbrainsHeaders(req, account.JWT)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to make request")
+	}
+
+	Debug("JetBrains API Response Status: %d", resp.StatusCode)
+
+	if resp.StatusCode == JetBrainsStatusQuotaExhausted {
+		Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
+		account.HasQuota = false
+		account.LastQuotaCheck = float64(time.Now().Unix())
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
+		resp.Body.Close() // 关闭原始 body，避免资源泄漏
+		errorMsg := string(body)
+		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
+
+		// 返回 nil response，因为调用者在错误情况下不会使用响应
+		return nil, resp.StatusCode, fmt.Errorf("JetBrains API error: %d - %s", resp.StatusCode, errorMsg)
+	}
+
+	return resp, http.StatusOK, nil
 }

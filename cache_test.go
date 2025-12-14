@@ -313,11 +313,8 @@ func TestNewCacheService(t *testing.T) {
 	defer service.Close()
 
 	// 验证内部缓存已初始化
-	if service.messages == nil {
-		t.Error("messages cache should be initialized")
-	}
-	if service.tools == nil {
-		t.Error("tools cache should be initialized")
+	if service.general == nil {
+		t.Error("general cache should be initialized")
 	}
 	if service.quota == nil {
 		t.Error("quota cache should be initialized")

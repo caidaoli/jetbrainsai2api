@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"expvar"
-	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -214,11 +211,7 @@ type PerformanceMetrics struct {
 	accountPoolWait   int64
 	accountPoolErrors int64
 
-	// 系统资源指标
-	memoryUsage    uint64
-	goroutineCount int
-
-	// 时间窗口统计
+	// QPS 计算
 	windowStartTime time.Time
 	windowRequests  int64
 }
@@ -239,14 +232,6 @@ type MetricsService struct {
 	// 性能指标
 	perfMetrics *PerformanceMetrics
 
-	// expvar 统计变量
-	httpRequestsVar    *expvar.Int
-	httpErrorsVar      *expvar.Int
-	cacheHitsVar       *expvar.Int
-	cacheMissesVar     *expvar.Int
-	toolValidationsVar *expvar.Int
-	avgResponseTimeVar *expvar.Float
-
 	// 配置
 	saveInterval time.Duration
 	historySize  int
@@ -260,10 +245,6 @@ type MetricsService struct {
 	pendingSave    int32 // 是否有待保存的数据（原子操作）
 	saveChan       chan bool
 	saveWorkerOnce sync.Once
-
-	// 监控控制
-	monitorCtx    context.Context
-	monitorCancel context.CancelFunc
 
 	// 优雅关闭
 	ctx    context.Context
@@ -282,26 +263,17 @@ type MetricsConfig struct {
 // NewMetricsService 创建新的指标服务
 func NewMetricsService(config MetricsConfig) *MetricsService {
 	ctx, cancel := context.WithCancel(context.Background())
-	monitorCtx, monitorCancel := context.WithCancel(context.Background())
 
 	ms := &MetricsService{
-		requestStats:       NewAtomicRequestStats(),
-		perfMetrics:        NewPerformanceMetrics(),
-		httpRequestsVar:    expvar.NewInt("http_requests_total"),
-		httpErrorsVar:      expvar.NewInt("http_errors_total"),
-		cacheHitsVar:       expvar.NewInt("cache_hits_total"),
-		cacheMissesVar:     expvar.NewInt("cache_misses_total"),
-		toolValidationsVar: expvar.NewInt("tool_validations_total"),
-		avgResponseTimeVar: expvar.NewFloat("avg_response_time_ms"),
-		saveInterval:       config.SaveInterval,
-		historySize:        config.HistorySize,
-		storage:            config.Storage,
-		logger:             config.Logger,
-		saveChan:           make(chan bool, 100),
-		ctx:                ctx,
-		cancel:             cancel,
-		monitorCtx:         monitorCtx,
-		monitorCancel:      monitorCancel,
+		requestStats: NewAtomicRequestStats(),
+		perfMetrics:  NewPerformanceMetrics(),
+		saveInterval: config.SaveInterval,
+		historySize:  config.HistorySize,
+		storage:      config.Storage,
+		logger:       config.Logger,
+		saveChan:     make(chan bool, 100),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 
 	// 启动异步保存工作协程
@@ -309,9 +281,6 @@ func NewMetricsService(config MetricsConfig) *MetricsService {
 		ms.wg.Add(1)
 		go ms.saveWorker()
 	})
-
-	// 启动性能监控
-	ms.startMetricsMonitor()
 
 	return ms
 }
@@ -333,16 +302,12 @@ func (ms *MetricsService) RecordHTTPRequest(duration time.Duration) {
 	ms.perfMetrics.httpRequests++
 	ms.perfMetrics.windowRequests++
 
-	// 计算平均响应时间
+	// 计算平均响应时间（指数移动平均）
 	if ms.perfMetrics.avgResponseTime == 0 {
 		ms.perfMetrics.avgResponseTime = float64(duration.Milliseconds())
 	} else {
 		ms.perfMetrics.avgResponseTime = (ms.perfMetrics.avgResponseTime*0.9 + float64(duration.Milliseconds())*0.1)
 	}
-
-	// 更新expvar
-	ms.httpRequestsVar.Add(1)
-	ms.avgResponseTimeVar.Set(ms.perfMetrics.avgResponseTime)
 }
 
 // RecordHTTPError 记录HTTP错误
@@ -351,7 +316,6 @@ func (ms *MetricsService) RecordHTTPError() {
 	defer ms.perfMetrics.mu.Unlock()
 
 	ms.perfMetrics.httpErrors++
-	ms.httpErrorsVar.Add(1)
 }
 
 // RecordCacheHit 记录缓存命中
@@ -366,8 +330,6 @@ func (ms *MetricsService) RecordCacheHit() {
 	if total > 0 {
 		ms.perfMetrics.cacheHitRate = float64(ms.perfMetrics.cacheHits) / float64(total)
 	}
-
-	ms.cacheHitsVar.Add(1)
 }
 
 // RecordCacheMiss 记录缓存未命中
@@ -382,8 +344,6 @@ func (ms *MetricsService) RecordCacheMiss() {
 	if total > 0 {
 		ms.perfMetrics.cacheHitRate = float64(ms.perfMetrics.cacheHits) / float64(total)
 	}
-
-	ms.cacheMissesVar.Add(1)
 }
 
 // RecordToolValidation 记录工具验证
@@ -393,13 +353,12 @@ func (ms *MetricsService) RecordToolValidation(duration time.Duration) {
 
 	ms.perfMetrics.toolValidations++
 
+	// 计算平均验证时间（指数移动平均）
 	if ms.perfMetrics.toolValidationTime == 0 {
 		ms.perfMetrics.toolValidationTime = float64(duration.Milliseconds())
 	} else {
 		ms.perfMetrics.toolValidationTime = (ms.perfMetrics.toolValidationTime*0.9 + float64(duration.Milliseconds())*0.1)
 	}
-
-	ms.toolValidationsVar.Add(1)
 }
 
 // RecordAccountPoolWait 记录账户池等待
@@ -418,27 +377,6 @@ func (ms *MetricsService) RecordAccountPoolError() {
 	ms.perfMetrics.accountPoolErrors++
 }
 
-// UpdateSystemMetrics 更新系统资源指标
-func (ms *MetricsService) UpdateSystemMetrics() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	ms.perfMetrics.mu.Lock()
-	defer ms.perfMetrics.mu.Unlock()
-
-	ms.perfMetrics.memoryUsage = m.Alloc
-	ms.perfMetrics.goroutineCount = runtime.NumGoroutine()
-}
-
-// ResetWindow 重置时间窗口统计
-func (ms *MetricsService) ResetWindow() {
-	ms.perfMetrics.mu.Lock()
-	defer ms.perfMetrics.mu.Unlock()
-
-	ms.perfMetrics.windowStartTime = time.Now()
-	ms.perfMetrics.windowRequests = 0
-}
-
 // GetQPS 获取当前QPS
 func (ms *MetricsService) GetQPS() float64 {
 	ms.perfMetrics.mu.RLock()
@@ -450,68 +388,6 @@ func (ms *MetricsService) GetQPS() float64 {
 	}
 
 	return float64(ms.perfMetrics.windowRequests) / windowDuration
-}
-
-// GetMetricsString 获取性能指标字符串
-func (ms *MetricsService) GetMetricsString() string {
-	ms.perfMetrics.mu.RLock()
-	defer ms.perfMetrics.mu.RUnlock()
-
-	// 安全计算错误率，避免除零错误
-	errorRate := 0.0
-	if ms.perfMetrics.httpRequests > 0 {
-		errorRate = float64(ms.perfMetrics.httpErrors) / float64(ms.perfMetrics.httpRequests) * 100
-	}
-
-	return fmt.Sprintf(`=== 性能指标统计 ===
-HTTP请求:
-- 总请求数: %d
-- 错误数: %d
-- 错误率: %.2f%%
-- 平均响应时间: %.2fms
-
-缓存性能:
-- 缓存命中: %d
-- 缓存未命中: %d
-- 命中率: %.2f%%
-
-工具验证:
-- 验证次数: %d
-- 平均验证时间: %.2fms
-
-账户管理:
-- 账户池等待次数: %d
-- 账户池错误次数: %d
-
-系统资源:
-- 内存使用: %d MB
-- 协程数量: %d
-
-当前窗口:
-- 窗口开始时间: %s
-- 窗口请求数: %d
-`,
-		ms.perfMetrics.httpRequests,
-		ms.perfMetrics.httpErrors,
-		errorRate,
-		ms.perfMetrics.avgResponseTime,
-
-		ms.perfMetrics.cacheHits,
-		ms.perfMetrics.cacheMisses,
-		ms.perfMetrics.cacheHitRate*100,
-
-		ms.perfMetrics.toolValidations,
-		ms.perfMetrics.toolValidationTime,
-
-		ms.perfMetrics.accountPoolWait,
-		ms.perfMetrics.accountPoolErrors,
-
-		ms.perfMetrics.memoryUsage/1024/1024,
-		ms.perfMetrics.goroutineCount,
-
-		ms.perfMetrics.windowStartTime.Format(TimeFormatDateTime),
-		ms.perfMetrics.windowRequests,
-	)
 }
 
 // GetRequestStats 获取请求统计
@@ -602,40 +478,8 @@ func (ms *MetricsService) saveStats() {
 	}
 }
 
-// startMetricsMonitor 启动性能监控
-func (ms *MetricsService) startMetricsMonitor() {
-	ms.wg.Add(1)
-	go func() {
-		defer ms.wg.Done()
-
-		ticker := time.NewTicker(MetricsMonitorInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				ms.UpdateSystemMetrics()
-
-				// 每5分钟重置窗口统计
-				if time.Since(ms.perfMetrics.windowStartTime) > MetricsWindowDuration {
-					ms.ResetWindow()
-				}
-
-			case <-ms.monitorCtx.Done():
-				// 收到停止信号，优雅退出监控 goroutine
-				return
-			}
-		}
-	}()
-}
-
 // Close 优雅关闭指标服务
 func (ms *MetricsService) Close() error {
-	// 停止监控
-	if ms.monitorCancel != nil {
-		ms.monitorCancel()
-	}
-
 	// 停止保存协程
 	if ms.cancel != nil {
 		ms.cancel()
