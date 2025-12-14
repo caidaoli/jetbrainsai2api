@@ -416,3 +416,422 @@ func TestMessageConverterConvert(t *testing.T) {
 		}
 	}
 }
+
+// TestConvertMessage 测试 convertMessage 方法的各分支
+func TestConvertMessage(t *testing.T) {
+	tests := []struct {
+		name         string
+		msg          ChatMessage
+		toolIDMap    map[string]string
+		expectedType string
+	}{
+		{
+			name:         "用户消息",
+			msg:          ChatMessage{Role: RoleUser, Content: "用户输入"},
+			expectedType: JetBrainsMessageTypeUser,
+		},
+		{
+			name:         "系统消息",
+			msg:          ChatMessage{Role: RoleSystem, Content: "系统提示"},
+			expectedType: JetBrainsMessageTypeSystem,
+		},
+		{
+			name:         "助手消息",
+			msg:          ChatMessage{Role: RoleAssistant, Content: "助手回复"},
+			expectedType: JetBrainsMessageTypeAssistantText,
+		},
+		{
+			name: "工具消息",
+			msg: ChatMessage{
+				Role:       RoleTool,
+				ToolCallID: "call_123",
+				Content:    "工具结果",
+			},
+			toolIDMap:    map[string]string{"call_123": "test_tool"},
+			expectedType: JetBrainsMessageTypeTool,
+		},
+		{
+			name:         "未知角色消息",
+			msg:          ChatMessage{Role: "custom_role", Content: "自定义消息"},
+			expectedType: JetBrainsMessageTypeUser,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			toolMap := tt.toolIDMap
+			if toolMap == nil {
+				toolMap = make(map[string]string)
+			}
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: toolMap,
+				validator:           NewImageValidator(),
+			}
+
+			result := converter.convertMessage(tt.msg)
+
+			if len(result) == 0 {
+				if tt.expectedType != "" {
+					t.Errorf("期望生成消息，实际为空")
+				}
+				return
+			}
+
+			if result[0].Type != tt.expectedType {
+				t.Errorf("消息类型错误，期望 '%s'，实际 '%s'",
+					tt.expectedType, result[0].Type)
+			}
+		})
+	}
+}
+
+// TestConvertImageContent 测试图像内容转换
+func TestConvertImageContent(t *testing.T) {
+	tests := []struct {
+		name           string
+		mediaType      string
+		imageData      string
+		content        any
+		expectedCount  int
+		expectedTypes  []string
+		hasMediaMsg    bool
+		expectTextOnly bool
+	}{
+		{
+			name:      "有效图像无文本",
+			mediaType: "image/png",
+			imageData: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+			content: []any{
+				map[string]any{
+					"type": "image_url",
+					"image_url": map[string]any{
+						"url": "data:image/png;base64,xxx",
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedTypes: []string{JetBrainsMessageTypeMedia},
+			hasMediaMsg:   true,
+		},
+		{
+			name:      "有效图像带文本",
+			mediaType: "image/jpeg",
+			imageData: "/9j/4AAQSkZJRg==",
+			content: []any{
+				map[string]any{
+					"type": "text",
+					"text": "描述这张图片",
+				},
+				map[string]any{
+					"type": "image_url",
+					"image_url": map[string]any{
+						"url": "data:image/jpeg;base64,xxx",
+					},
+				},
+			},
+			expectedCount: 2,
+			expectedTypes: []string{JetBrainsMessageTypeMedia, JetBrainsMessageTypeUser},
+			hasMediaMsg:   true,
+		},
+		{
+			name:      "无效图像格式回退文本",
+			mediaType: "image/bmp", // 不支持的格式
+			imageData: "invalid_data",
+			content: []any{
+				map[string]any{
+					"type": "text",
+					"text": "回退文本内容",
+				},
+			},
+			expectedCount:  1,
+			expectedTypes:  []string{JetBrainsMessageTypeUser},
+			hasMediaMsg:    false,
+			expectTextOnly: true,
+		},
+		{
+			name:      "无效base64数据回退文本",
+			mediaType: "image/png",
+			imageData: "not-valid-base64!!!",
+			content: []any{
+				map[string]any{
+					"type": "text",
+					"text": "错误时的文本",
+				},
+			},
+			expectedCount:  1,
+			expectedTypes:  []string{JetBrainsMessageTypeUser},
+			hasMediaMsg:    false,
+			expectTextOnly: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: make(map[string]string),
+				validator:           NewImageValidator(),
+			}
+
+			result := converter.convertImageContent(tt.mediaType, tt.imageData, tt.content)
+
+			if len(result) != tt.expectedCount {
+				t.Errorf("期望生成 %d 个消息，实际生成 %d 个", tt.expectedCount, len(result))
+				return
+			}
+
+			for i, expectedType := range tt.expectedTypes {
+				if i < len(result) && result[i].Type != expectedType {
+					t.Errorf("消息 %d 类型错误，期望 '%s'，实际 '%s'",
+						i, expectedType, result[i].Type)
+				}
+			}
+
+			// 验证是否有媒体消息
+			hasMedia := false
+			for _, msg := range result {
+				if msg.Type == JetBrainsMessageTypeMedia {
+					hasMedia = true
+					break
+				}
+			}
+			if hasMedia != tt.hasMediaMsg {
+				t.Errorf("媒体消息存在状态错误，期望 %v，实际 %v", tt.hasMediaMsg, hasMedia)
+			}
+		})
+	}
+}
+
+// TestConvertUserMessage 测试用户消息转换
+func TestConvertUserMessage(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       any
+		expectedCount int
+		expectedTypes []string
+	}{
+		{
+			name:          "纯文本字符串",
+			content:       "简单的用户消息",
+			expectedCount: 1,
+			expectedTypes: []string{JetBrainsMessageTypeUser},
+		},
+		{
+			name: "文本数组内容",
+			content: []any{
+				map[string]any{"type": "text", "text": "第一段"},
+				map[string]any{"type": "text", "text": "第二段"},
+			},
+			expectedCount: 2,
+			expectedTypes: []string{JetBrainsMessageTypeUser, JetBrainsMessageTypeUser},
+		},
+		{
+			name: "包含图像的内容",
+			content: []any{
+				map[string]any{"type": "text", "text": "描述图片"},
+				map[string]any{
+					"type": "image_url",
+					"image_url": map[string]any{
+						"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+					},
+				},
+			},
+			expectedCount: 2,
+			expectedTypes: []string{JetBrainsMessageTypeMedia, JetBrainsMessageTypeUser},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: make(map[string]string),
+				validator:           NewImageValidator(),
+			}
+
+			msg := ChatMessage{Role: RoleUser, Content: tt.content}
+			result := converter.convertUserMessage(msg)
+
+			if len(result) != tt.expectedCount {
+				t.Errorf("期望生成 %d 个消息，实际生成 %d 个", tt.expectedCount, len(result))
+				return
+			}
+
+			for i, expectedType := range tt.expectedTypes {
+				if i < len(result) && result[i].Type != expectedType {
+					t.Errorf("消息 %d 类型错误，期望 '%s'，实际 '%s'",
+						i, expectedType, result[i].Type)
+				}
+			}
+		})
+	}
+}
+
+// TestConvertTextContent 测试文本内容转换
+func TestConvertTextContent(t *testing.T) {
+	tests := []struct {
+		name            string
+		content         any
+		expectedCount   int
+		expectedContent []string
+	}{
+		{
+			name:            "字符串内容",
+			content:         "纯文本",
+			expectedCount:   1,
+			expectedContent: []string{"纯文本"},
+		},
+		{
+			name: "单个文本块",
+			content: []any{
+				map[string]any{"type": "text", "text": "块内文本"},
+			},
+			expectedCount:   1,
+			expectedContent: []string{"块内文本"},
+		},
+		{
+			name: "多个文本块",
+			content: []any{
+				map[string]any{"type": "text", "text": "第一块"},
+				map[string]any{"type": "text", "text": "第二块"},
+				map[string]any{"type": "text", "text": "第三块"},
+			},
+			expectedCount:   3,
+			expectedContent: []string{"第一块", "第二块", "第三块"},
+		},
+		{
+			name: "空文本块被忽略",
+			content: []any{
+				map[string]any{"type": "text", "text": ""},
+				map[string]any{"type": "text", "text": "有效内容"},
+			},
+			expectedCount:   1,
+			expectedContent: []string{"有效内容"},
+		},
+		{
+			name: "非文本类型被忽略",
+			content: []any{
+				map[string]any{"type": "image_url", "url": "xxx"},
+				map[string]any{"type": "text", "text": "只有文本"},
+			},
+			expectedCount:   1,
+			expectedContent: []string{"只有文本"},
+		},
+		{
+			name:            "空数组",
+			content:         []any{},
+			expectedCount:   0,
+			expectedContent: []string{},
+		},
+		{
+			name:            "数字内容（不支持）",
+			content:         12345,
+			expectedCount:   1,
+			expectedContent: []string{""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: make(map[string]string),
+				validator:           NewImageValidator(),
+			}
+
+			result := converter.convertTextContent(tt.content)
+
+			if len(result) != tt.expectedCount {
+				t.Errorf("期望生成 %d 个消息，实际生成 %d 个", tt.expectedCount, len(result))
+				return
+			}
+
+			for i, expectedContent := range tt.expectedContent {
+				if i < len(result) && result[i].Content != expectedContent {
+					t.Errorf("消息 %d 内容错误，期望 '%s'，实际 '%s'",
+						i, expectedContent, result[i].Content)
+				}
+			}
+		})
+	}
+}
+
+// TestConvertAssistantToolCall 测试助手工具调用转换
+func TestConvertAssistantToolCall(t *testing.T) {
+	tests := []struct {
+		name           string
+		toolCall       ToolCall
+		expectedID     string
+		expectedName   string
+		checkArgsValid bool
+	}{
+		{
+			name: "正常工具调用",
+			toolCall: ToolCall{
+				ID:   "call_abc123",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "get_weather",
+					Arguments: `{"city":"Beijing","unit":"celsius"}`,
+				},
+			},
+			expectedID:     "call_abc123",
+			expectedName:   "get_weather",
+			checkArgsValid: true,
+		},
+		{
+			name: "无效JSON参数保持原样",
+			toolCall: ToolCall{
+				ID:   "call_xyz",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "broken_tool",
+					Arguments: `{invalid json`,
+				},
+			},
+			expectedID:   "call_xyz",
+			expectedName: "broken_tool",
+		},
+		{
+			name: "空参数",
+			toolCall: ToolCall{
+				ID:   "call_empty",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "no_args_tool",
+					Arguments: `{}`,
+				},
+			},
+			expectedID:     "call_empty",
+			expectedName:   "no_args_tool",
+			checkArgsValid: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: make(map[string]string),
+			}
+
+			result := converter.convertAssistantToolCall(tt.toolCall)
+
+			if len(result) != 1 {
+				t.Errorf("期望生成 1 个消息，实际生成 %d 个", len(result))
+				return
+			}
+
+			if result[0].Type != JetBrainsMessageTypeAssistantTool {
+				t.Errorf("消息类型错误，期望 '%s'，实际 '%s'",
+					JetBrainsMessageTypeAssistantTool, result[0].Type)
+			}
+
+			if result[0].ID != tt.expectedID {
+				t.Errorf("工具ID错误，期望 '%s'，实际 '%s'",
+					tt.expectedID, result[0].ID)
+			}
+
+			if result[0].ToolName != tt.expectedName {
+				t.Errorf("工具名称错误，期望 '%s'，实际 '%s'",
+					tt.expectedName, result[0].ToolName)
+			}
+		})
+	}
+}

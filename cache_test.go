@@ -639,3 +639,211 @@ func TestLRUCache_Clear(t *testing.T) {
 		t.Error("key2 应该被清除")
 	}
 }
+
+// TestLRUCache_CleanupExpired 测试过期清理功能
+func TestLRUCache_CleanupExpired(t *testing.T) {
+	cache := NewCache()
+	defer cache.Stop()
+
+	// 添加一个短期过期的项
+	cache.Set("short", "value", 50*time.Millisecond)
+	// 添加一个长期有效的项
+	cache.Set("long", "value", 1*time.Hour)
+
+	// 验证两个项都存在
+	_, found := cache.Get("short")
+	if !found {
+		t.Error("short 应该存在")
+	}
+	_, found = cache.Get("long")
+	if !found {
+		t.Error("long 应该存在")
+	}
+
+	// 等待过期
+	time.Sleep(100 * time.Millisecond)
+
+	// 手动触发清理
+	cache.cleanupExpired()
+
+	// 验证 short 被清理，long 仍然存在
+	_, found = cache.Get("short")
+	if found {
+		t.Error("short 应该被清理")
+	}
+	_, found = cache.Get("long")
+	if !found {
+		t.Error("long 应该仍然存在")
+	}
+}
+
+// TestLRUCache_CleanupExpired_Empty 测试空缓存的清理
+func TestLRUCache_CleanupExpired_Empty(t *testing.T) {
+	cache := NewCache()
+	defer cache.Stop()
+
+	// 空缓存调用清理不应该 panic
+	cache.cleanupExpired()
+}
+
+// TestLRUCache_Evict_EmptyCache 测试空缓存驱逐
+func TestLRUCache_Evict_EmptyCache(t *testing.T) {
+	cache := NewCache()
+	defer cache.Stop()
+
+	// 空缓存调用驱逐不应该 panic
+	cache.mu.Lock()
+	cache.evict()
+	cache.mu.Unlock()
+}
+
+// TestGenerateMessagesCacheKey_WithToolCalls 测试带工具调用的消息缓存键
+func TestGenerateMessagesCacheKey_WithToolCalls(t *testing.T) {
+	messages1 := []ChatMessage{
+		{
+			Role: RoleAssistant,
+			ToolCalls: []ToolCall{
+				{ID: "call_1", Type: "function", Function: Function{Name: "get_weather", Arguments: `{"city":"Beijing"}`}},
+			},
+		},
+	}
+	messages2 := []ChatMessage{
+		{
+			Role: RoleAssistant,
+			ToolCalls: []ToolCall{
+				{ID: "call_1", Type: "function", Function: Function{Name: "get_weather", Arguments: `{"city":"Beijing"}`}},
+			},
+		},
+	}
+	messages3 := []ChatMessage{
+		{
+			Role: RoleAssistant,
+			ToolCalls: []ToolCall{
+				{ID: "call_2", Type: "function", Function: Function{Name: "get_weather", Arguments: `{"city":"Shanghai"}`}},
+			},
+		},
+	}
+
+	key1 := generateMessagesCacheKey(messages1)
+	key2 := generateMessagesCacheKey(messages2)
+	key3 := generateMessagesCacheKey(messages3)
+
+	// 相同消息生成相同键
+	if key1 != key2 {
+		t.Error("相同工具调用消息应该生成相同缓存键")
+	}
+
+	// 不同工具调用生成不同键
+	if key1 == key3 {
+		t.Error("不同工具调用消息应该生成不同缓存键")
+	}
+}
+
+// TestGenerateToolsCacheKey_WithParameters 测试带参数的工具缓存键
+func TestGenerateToolsCacheKey_WithParameters(t *testing.T) {
+	// 使用相同的引用确保完全一致
+	params := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"city": map[string]any{"type": "string"},
+		},
+	}
+
+	tools1 := []Tool{
+		{
+			Type: ToolTypeFunction,
+			Function: ToolFunction{
+				Name:        "get_weather",
+				Description: "Get weather info",
+				Parameters:  params,
+			},
+		},
+	}
+	tools2 := []Tool{
+		{
+			Type: ToolTypeFunction,
+			Function: ToolFunction{
+				Name:        "get_weather",
+				Description: "Get weather info",
+				Parameters:  params, // 使用相同引用
+			},
+		},
+	}
+	tools3 := []Tool{
+		{
+			Type: ToolTypeFunction,
+			Function: ToolFunction{
+				Name:        "get_time", // 不同函数名
+				Description: "Get time info",
+				Parameters:  params,
+			},
+		},
+	}
+
+	key1 := generateToolsCacheKey(tools1)
+	key2 := generateToolsCacheKey(tools2)
+	key3 := generateToolsCacheKey(tools3)
+
+	// 相同工具生成相同键
+	if key1 != key2 {
+		t.Errorf("相同工具定义应该生成相同缓存键，key1=%s, key2=%s", key1, key2)
+	}
+
+	// 不同函数名生成不同键
+	if key1 == key3 {
+		t.Error("不同函数名应该生成不同缓存键")
+	}
+}
+
+// TestGenerateMessagesCacheKey_EmptyMessages 测试空消息列表
+func TestGenerateMessagesCacheKey_EmptyMessages(t *testing.T) {
+	key := generateMessagesCacheKey([]ChatMessage{})
+
+	if key == "" {
+		t.Error("即使是空消息列表也应该生成缓存键")
+	}
+
+	// 验证键格式包含版本号前缀
+	if len(key) < 5 {
+		t.Error("缓存键格式不正确")
+	}
+}
+
+// TestGenerateToolsCacheKey_EmptyTools 测试空工具列表
+func TestGenerateToolsCacheKey_EmptyTools(t *testing.T) {
+	key := generateToolsCacheKey([]Tool{})
+
+	if key == "" {
+		t.Error("即使是空工具列表也应该生成缓存键")
+	}
+}
+
+// TestCacheService_QuotaCache_Expiration 测试配额缓存过期
+func TestCacheService_QuotaCache_Expiration(t *testing.T) {
+	service := NewCacheService()
+	defer service.Close()
+
+	quotaResponse := &JetbrainsQuotaResponse{
+		Until: "2099-12-31",
+	}
+	quotaResponse.Current.Current.Amount = "100"
+	quotaResponse.Current.Maximum.Amount = "1000"
+
+	// 设置短期过期
+	service.SetQuotaCache("test-key", quotaResponse, 50*time.Millisecond)
+
+	// 立即获取应该成功
+	_, found := service.GetQuotaCache("test-key")
+	if !found {
+		t.Error("配额缓存应该存在")
+	}
+
+	// 等待过期
+	time.Sleep(100 * time.Millisecond)
+
+	// 现在应该找不到
+	_, found = service.GetQuotaCache("test-key")
+	if found {
+		t.Error("配额缓存应该已过期")
+	}
+}
