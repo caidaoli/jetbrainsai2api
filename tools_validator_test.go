@@ -608,3 +608,179 @@ func TestTransformParameters(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateToolCallResponse 测试工具调用响应验证
+func TestValidateToolCallResponse(t *testing.T) {
+	tests := []struct {
+		name      string
+		toolCall  ToolCall
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name: "有效的工具调用",
+			toolCall: ToolCall{
+				ID:   "call_123",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "get_weather",
+					Arguments: `{"city":"Beijing"}`,
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "空ID",
+			toolCall: ToolCall{
+				ID:   "",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "get_weather",
+					Arguments: `{}`,
+				},
+			},
+			expectErr: true,
+			errMsg:    "tool call ID is empty",
+		},
+		{
+			name: "空函数名",
+			toolCall: ToolCall{
+				ID:   "call_123",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "",
+					Arguments: `{}`,
+				},
+			},
+			expectErr: true,
+			errMsg:    "tool call function name is empty",
+		},
+		{
+			name: "无效JSON参数",
+			toolCall: ToolCall{
+				ID:   "call_123",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "test_func",
+					Arguments: `{invalid json}`,
+				},
+			},
+			expectErr: true,
+			errMsg:    "not valid JSON",
+		},
+		{
+			name: "空参数（有效）",
+			toolCall: ToolCall{
+				ID:   "call_123",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "no_args_func",
+					Arguments: "",
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "复杂JSON参数",
+			toolCall: ToolCall{
+				ID:   "call_456",
+				Type: ToolTypeFunction,
+				Function: Function{
+					Name:      "complex_func",
+					Arguments: `{"nested":{"array":[1,2,3],"object":{"key":"value"}},"bool":true}`,
+				},
+			},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateToolCallResponse(tt.toolCall)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("期望有错误，实际无错误")
+					return
+				}
+				if tt.errMsg != "" && !containsSubstr(err.Error(), tt.errMsg) {
+					t.Errorf("错误消息应包含 '%s'，实际: '%s'", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("不期望错误: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// containsSubstr 检查字符串是否包含子串
+func containsSubstr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// TestTruncateCacheKey 测试缓存键截断
+func TestTruncateCacheKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "短于限制不截断",
+			key:      "short",
+			maxLen:   10,
+			expected: "short",
+		},
+		{
+			name:     "等于限制不截断",
+			key:      "exactly10!",
+			maxLen:   10,
+			expected: "exactly10!",
+		},
+		{
+			name:     "超过限制截断",
+			key:      "this_is_a_very_long_cache_key",
+			maxLen:   10,
+			expected: "this_is_a_",
+		},
+		{
+			name:     "空字符串",
+			key:      "",
+			maxLen:   10,
+			expected: "",
+		},
+		{
+			name:     "maxLen为0",
+			key:      "any",
+			maxLen:   0,
+			expected: "",
+		},
+		{
+			name:     "maxLen为1",
+			key:      "abc",
+			maxLen:   1,
+			expected: "a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateCacheKey(tt.key, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
+			// 验证结果长度不超过maxLen
+			if len(result) > tt.maxLen {
+				t.Errorf("结果长度 %d 超过限制 %d", len(result), tt.maxLen)
+			}
+		})
+	}
+}
