@@ -572,3 +572,175 @@ func TestExtractToolInfo(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractStringContent 测试字符串内容提取
+func TestExtractStringContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  any
+		expected string
+	}{
+		{
+			name:     "字符串内容",
+			content:  "Hello World",
+			expected: "Hello World",
+		},
+		{
+			name:     "空字符串",
+			content:  "",
+			expected: "",
+		},
+		{
+			name: "单个text块",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "Text content",
+				},
+			},
+			expected: "Text content",
+		},
+		{
+			name: "多个text块取第一个",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "First text",
+				},
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "Second text",
+				},
+			},
+			expected: "First text",
+		},
+		{
+			name: "tool_use块返回input的JSON",
+			content: []any{
+				map[string]any{
+					"type":  ContentBlockTypeToolUse,
+					"id":    "toolu_123",
+					"name":  "get_weather",
+					"input": map[string]any{"city": "Beijing"},
+				},
+			},
+			expected: `{"city":"Beijing"}`,
+		},
+		{
+			name: "空text块被忽略",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "",
+				},
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "Valid text",
+				},
+			},
+			expected: "Valid text",
+		},
+		{
+			name:     "数字类型",
+			content:  123,
+			expected: "123",
+		},
+		{
+			name:     "nil内容",
+			content:  nil,
+			expected: "<nil>",
+		},
+		{
+			name:     "空数组",
+			content:  []any{},
+			expected: "[]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractStringContent(tt.content)
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestAnthropicToJetbrainsTools 测试Anthropic工具转换为JetBrains格式
+func TestAnthropicToJetbrainsTools(t *testing.T) {
+	tests := []struct {
+		name          string
+		tools         []AnthropicTool
+		expectedCount int
+		expectedNames []string
+	}{
+		{
+			name:          "空工具列表",
+			tools:         []AnthropicTool{},
+			expectedCount: 0,
+		},
+		{
+			name:          "nil工具列表",
+			tools:         nil,
+			expectedCount: 0,
+		},
+		{
+			name: "单个工具",
+			tools: []AnthropicTool{
+				{
+					Name:        "get_weather",
+					Description: "Get weather info",
+					InputSchema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"city": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedNames: []string{"get_weather"},
+		},
+		{
+			name: "多个工具",
+			tools: []AnthropicTool{
+				{
+					Name:        "tool_a",
+					Description: "Tool A description",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				{
+					Name:        "tool_b",
+					Description: "Tool B description",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				{
+					Name:        "tool_c",
+					Description: "Tool C description",
+					InputSchema: map[string]any{"type": "object"},
+				},
+			},
+			expectedCount: 3,
+			expectedNames: []string{"tool_a", "tool_b", "tool_c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := anthropicToJetbrainsTools(tt.tools)
+
+			if len(result) != tt.expectedCount {
+				t.Errorf("期望 %d 个工具，实际 %d 个", tt.expectedCount, len(result))
+				return
+			}
+
+			for i, expectedName := range tt.expectedNames {
+				if result[i].Name != expectedName {
+					t.Errorf("工具 %d 名称错误，期望 '%s'，实际 '%s'",
+						i, expectedName, result[i].Name)
+				}
+			}
+		})
+	}
+}
