@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -109,4 +111,284 @@ func TestGetInternalModelName_NilModels(t *testing.T) {
 	if result != "any-model" {
 		t.Errorf("nil映射时应返回原模型ID，期望 'any-model'，实际 '%s'", result)
 	}
+}
+
+// TestLoadModels 测试模型加载函数
+func TestLoadModels(t *testing.T) {
+	tests := []struct {
+		name        string
+		fileContent string
+		wantErr     bool
+		errContains string
+		validate    func(t *testing.T, result ModelsData)
+	}{
+		{
+			name:        "新格式JSON(map)",
+			fileContent: `{"models":{"gpt-4":"internal-gpt4","claude-3":"internal-claude3"}}`,
+			wantErr:     false,
+			validate: func(t *testing.T, result ModelsData) {
+				if len(result.Data) != 2 {
+					t.Errorf("期望加载2个模型，实际 %d", len(result.Data))
+				}
+				modelIDs := make(map[string]bool)
+				for _, model := range result.Data {
+					modelIDs[model.ID] = true
+					if model.Object != ModelObjectType {
+						t.Errorf("模型 %s 的 Object 应为 '%s'，实际 '%s'", model.ID, ModelObjectType, model.Object)
+					}
+					if model.OwnedBy != ModelOwner {
+						t.Errorf("模型 %s 的 OwnedBy 应为 '%s'，实际 '%s'", model.ID, ModelOwner, model.OwnedBy)
+					}
+					if model.Created <= 0 {
+						t.Errorf("模型 %s 的 Created 时间戳应大于0", model.ID)
+					}
+				}
+				if !modelIDs["gpt-4"] || !modelIDs["claude-3"] {
+					t.Errorf("应包含 gpt-4 和 claude-3 模型")
+				}
+			},
+		},
+		{
+			name:        "旧格式JSON(数组)",
+			fileContent: `["gpt-4","gpt-3.5-turbo","claude-3"]`,
+			wantErr:     false,
+			validate: func(t *testing.T, result ModelsData) {
+				if len(result.Data) != 3 {
+					t.Errorf("期望加载3个模型，实际 %d", len(result.Data))
+				}
+				modelIDs := make(map[string]bool)
+				for _, model := range result.Data {
+					modelIDs[model.ID] = true
+					if model.Object != ModelObjectType {
+						t.Errorf("模型 %s 的 Object 应为 '%s'，实际 '%s'", model.ID, ModelObjectType, model.Object)
+					}
+					if model.OwnedBy != ModelOwner {
+						t.Errorf("模型 %s 的 OwnedBy 应为 '%s'，实际 '%s'", model.ID, ModelOwner, model.OwnedBy)
+					}
+				}
+				if !modelIDs["gpt-4"] || !modelIDs["gpt-3.5-turbo"] || !modelIDs["claude-3"] {
+					t.Errorf("应包含 gpt-4, gpt-3.5-turbo 和 claude-3 模型")
+				}
+			},
+		},
+		{
+			name:        "空模型列表(新格式)",
+			fileContent: `{"models":{}}`,
+			wantErr:     false,
+			validate: func(t *testing.T, result ModelsData) {
+				if len(result.Data) != 0 {
+					t.Errorf("期望加载0个模型，实际 %d", len(result.Data))
+				}
+			},
+		},
+		{
+			name:        "空模型列表(旧格式)",
+			fileContent: `[]`,
+			wantErr:     false,
+			validate: func(t *testing.T, result ModelsData) {
+				if len(result.Data) != 0 {
+					t.Errorf("期望加载0个模型，实际 %d", len(result.Data))
+				}
+			},
+		},
+		{
+			name:        "无效JSON",
+			fileContent: `{invalid json}`,
+			wantErr:     true,
+			errContains: "failed to parse",
+		},
+		{
+			name:        "既不是map也不是数组",
+			fileContent: `"just a string"`,
+			wantErr:     true,
+			errContains: "failed to parse",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 创建临时文件
+			tmpFile, err := os.CreateTemp("", "models_*.json")
+			if err != nil {
+				t.Fatalf("创建临时文件失败: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
+
+			// 写入测试内容
+			if _, err := tmpFile.WriteString(tt.fileContent); err != nil {
+				t.Fatalf("写入临时文件失败: %v", err)
+			}
+			tmpFile.Close()
+
+			// 执行测试
+			result, err := loadModels(tmpFile.Name())
+
+			// 验证错误
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("期望返回错误，但成功了")
+				} else if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+					t.Errorf("期望错误包含 '%s'，实际错误: %v", tt.errContains, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("不期望返回错误，实际: %v", err)
+				return
+			}
+
+			// 验证结果
+			if tt.validate != nil {
+				tt.validate(t, result)
+			}
+		})
+	}
+}
+
+// TestLoadModels_FileNotFound 测试文件不存在的情况
+func TestLoadModels_FileNotFound(t *testing.T) {
+	result, err := loadModels("/nonexistent/path/models.json")
+
+	if err == nil {
+		t.Errorf("期望返回错误，但成功了")
+	}
+
+	if !contains(err.Error(), "failed to read") {
+		t.Errorf("期望错误包含 'failed to read'，实际: %v", err)
+	}
+
+	if len(result.Data) != 0 {
+		t.Errorf("文件不存在时应返回空结果，实际返回了 %d 个模型", len(result.Data))
+	}
+}
+
+// TestGetModelItem 测试从模型数据中查找模型
+func TestGetModelItem(t *testing.T) {
+	modelsData := ModelsData{
+		Data: []ModelInfo{
+			{
+				ID:      "gpt-4",
+				Object:  ModelObjectType,
+				Created: 1234567890,
+				OwnedBy: ModelOwner,
+			},
+			{
+				ID:      "claude-3",
+				Object:  ModelObjectType,
+				Created: 1234567891,
+				OwnedBy: ModelOwner,
+			},
+			{
+				ID:      "gpt-3.5-turbo",
+				Object:  ModelObjectType,
+				Created: 1234567892,
+				OwnedBy: ModelOwner,
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		data     ModelsData
+		modelID  string
+		wantNil  bool
+		validate func(t *testing.T, result *ModelInfo)
+	}{
+		{
+			name:    "找到第一个模型",
+			data:    modelsData,
+			modelID: "gpt-4",
+			wantNil: false,
+			validate: func(t *testing.T, result *ModelInfo) {
+				if result.ID != "gpt-4" {
+					t.Errorf("期望模型ID为 'gpt-4'，实际 '%s'", result.ID)
+				}
+				if result.Created != 1234567890 {
+					t.Errorf("期望Created为 1234567890，实际 %d", result.Created)
+				}
+			},
+		},
+		{
+			name:    "找到中间的模型",
+			data:    modelsData,
+			modelID: "claude-3",
+			wantNil: false,
+			validate: func(t *testing.T, result *ModelInfo) {
+				if result.ID != "claude-3" {
+					t.Errorf("期望模型ID为 'claude-3'，实际 '%s'", result.ID)
+				}
+				if result.Created != 1234567891 {
+					t.Errorf("期望Created为 1234567891，实际 %d", result.Created)
+				}
+			},
+		},
+		{
+			name:    "找到最后一个模型",
+			data:    modelsData,
+			modelID: "gpt-3.5-turbo",
+			wantNil: false,
+			validate: func(t *testing.T, result *ModelInfo) {
+				if result.ID != "gpt-3.5-turbo" {
+					t.Errorf("期望模型ID为 'gpt-3.5-turbo'，实际 '%s'", result.ID)
+				}
+			},
+		},
+		{
+			name:    "找不到模型",
+			data:    modelsData,
+			modelID: "nonexistent-model",
+			wantNil: true,
+		},
+		{
+			name:    "空模型ID",
+			data:    modelsData,
+			modelID: "",
+			wantNil: true,
+		},
+		{
+			name: "空模型列表",
+			data: ModelsData{
+				Data: []ModelInfo{},
+			},
+			modelID: "gpt-4",
+			wantNil: true,
+		},
+		{
+			name: "nil模型列表",
+			data: ModelsData{
+				Data: nil,
+			},
+			modelID: "gpt-4",
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getModelItem(tt.data, tt.modelID)
+
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("期望返回 nil，实际返回了模型: %+v", result)
+				}
+				return
+			}
+
+			if result == nil {
+				t.Errorf("期望找到模型，实际返回 nil")
+				return
+			}
+
+			// 验证结果
+			if tt.validate != nil {
+				tt.validate(t, result)
+			}
+		})
+	}
+}
+
+// 辅助函数：字符串包含检查
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

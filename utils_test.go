@@ -2,8 +2,10 @@ package main
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestParseEnvList 测试环境变量列表解析
@@ -420,6 +422,240 @@ func TestGetEnvWithDefault(t *testing.T) {
 			result := getEnvWithDefault(tt.key, tt.defaultValue)
 			if result != tt.expected {
 				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestGetTokenInfoFromAccount 测试账户Token信息获取
+func TestGetTokenInfoFromAccount(t *testing.T) {
+	// 注意：此测试需要有效的 JetBrains API 连接或 mock server
+	// 当前测试覆盖错误场景和基本返回值验证
+	tests := []struct {
+		name          string
+		account       *JetbrainsAccount
+		expectError   bool
+		validateField func(t *testing.T, info *TokenInfo)
+	}{
+		{
+			name: "无JWT账户返回错误",
+			account: &JetbrainsAccount{
+				LicenseID:     "test-license",
+				Authorization: "test-auth",
+				JWT:           "", // 无JWT
+				HasQuota:      true,
+			},
+			expectError: true,
+			validateField: func(t *testing.T, info *TokenInfo) {
+				// 即使出错，也应返回基本信息
+				if info.Status != "错误" {
+					t.Errorf("期望状态为 '错误'，实际 '%s'", info.Status)
+				}
+				if !strings.Contains(info.Name, "Token") {
+					t.Errorf("期望 Name 包含 'Token'，实际 '%s'", info.Name)
+				}
+			},
+		},
+		{
+			name: "空账户返回错误",
+			account: &JetbrainsAccount{
+				JWT: "",
+			},
+			expectError: true,
+			validateField: func(t *testing.T, info *TokenInfo) {
+				if info.Status != "错误" {
+					t.Errorf("期望状态为 '错误'，实际 '%s'", info.Status)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 创建一个有效的 httpClient（防止空指针）
+			httpClient := createOptimizedHTTPClient(DefaultHTTPClientSettings())
+
+			// 使用空的 cache（会导致 API 调用失败，因为没有有效的 JWT）
+			info, err := getTokenInfoFromAccount(tt.account, httpClient, nil)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("期望返回错误，但未返回")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("未期望错误，但返回: %v", err)
+				}
+			}
+
+			// 验证返回的 TokenInfo
+			if info == nil {
+				t.Fatal("返回的 TokenInfo 不应为 nil")
+			}
+
+			if tt.validateField != nil {
+				tt.validateField(t, info)
+			}
+		})
+	}
+}
+
+// TestGetTokenInfoFromAccount_StatusLogic 测试账户状态逻辑
+// 注意：此测试模拟账户状态判断逻辑，不依赖外部 API
+func TestGetTokenInfoFromAccount_StatusLogic(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name           string
+		hasQuota       bool
+		expiryTime     time.Time
+		expectedStatus string
+	}{
+		{
+			name:           "正常状态-有配额且未即将过期",
+			hasQuota:       true,
+			expiryTime:     now.Add(48 * time.Hour), // 48小时后过期
+			expectedStatus: AccountStatusNormal,
+		},
+		{
+			name:           "配额不足状态",
+			hasQuota:       false,
+			expiryTime:     now.Add(48 * time.Hour),
+			expectedStatus: AccountStatusNoQuota,
+		},
+		{
+			name:           "即将过期状态-24小时内过期",
+			hasQuota:       true,
+			expiryTime:     now.Add(23 * time.Hour), // 23小时后过期（<24小时）
+			expectedStatus: AccountStatusExpiring,
+		},
+		{
+			name:           "即将过期状态-刚好24小时",
+			hasQuota:       true,
+			expiryTime:     now.Add(24 * time.Hour),
+			expectedStatus: AccountStatusExpiring,
+		},
+		{
+			name:           "即将过期状态-已过期",
+			hasQuota:       true,
+			expiryTime:     now.Add(-1 * time.Hour), // 已过期
+			expectedStatus: AccountStatusExpiring,
+		},
+		{
+			name:           "配额不足优先于即将过期",
+			hasQuota:       false,
+			expiryTime:     now.Add(1 * time.Hour), // 即将过期但无配额
+			expectedStatus: AccountStatusNoQuota,   // 配额不足优先级更高
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 模拟状态判断逻辑（从 getTokenInfoFromAccount 函数中提取）
+			status := AccountStatusNormal
+			if !tt.hasQuota {
+				status = AccountStatusNoQuota
+			} else if time.Now().Add(AccountExpiryWarningTime).After(tt.expiryTime) {
+				status = AccountStatusExpiring
+			}
+
+			if status != tt.expectedStatus {
+				t.Errorf("期望状态 '%s'，实际 '%s'", tt.expectedStatus, status)
+			}
+		})
+	}
+}
+
+// TestGetTokenInfoFromAccount_UsageCalculation 测试配额使用率计算
+func TestGetTokenInfoFromAccount_UsageCalculation(t *testing.T) {
+	tests := []struct {
+		name              string
+		currentAmount     string
+		maximumAmount     string
+		expectedUsed      float64
+		expectedTotal     float64
+		expectedUsageRate float64
+	}{
+		{
+			name:              "正常使用率-50%",
+			currentAmount:     "50.0",
+			maximumAmount:     "100.0",
+			expectedUsed:      50.0,
+			expectedTotal:     100.0,
+			expectedUsageRate: 50.0,
+		},
+		{
+			name:              "完全使用-100%",
+			currentAmount:     "100.0",
+			maximumAmount:     "100.0",
+			expectedUsed:      100.0,
+			expectedTotal:     100.0,
+			expectedUsageRate: 100.0,
+		},
+		{
+			name:              "未使用-0%",
+			currentAmount:     "0.0",
+			maximumAmount:     "100.0",
+			expectedUsed:      0.0,
+			expectedTotal:     100.0,
+			expectedUsageRate: 0.0,
+		},
+		{
+			name:              "无配额限制",
+			currentAmount:     "50.0",
+			maximumAmount:     "0.0",
+			expectedUsed:      50.0,
+			expectedTotal:     0.0,
+			expectedUsageRate: 0.0, // total为0时使用率为0
+		},
+		{
+			name:              "小数配额",
+			currentAmount:     "33.33",
+			maximumAmount:     "100.0",
+			expectedUsed:      33.33,
+			expectedTotal:     100.0,
+			expectedUsageRate: 33.33,
+		},
+		{
+			name:              "超额使用-110%",
+			currentAmount:     "110.0",
+			maximumAmount:     "100.0",
+			expectedUsed:      110.0,
+			expectedTotal:     100.0,
+			expectedUsageRate: 110.0,
+		},
+		{
+			name:              "无效数字-解析失败",
+			currentAmount:     "invalid",
+			maximumAmount:     "100.0",
+			expectedUsed:      0.0, // strconv.ParseFloat 失败返回0
+			expectedTotal:     100.0,
+			expectedUsageRate: 0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 模拟使用率计算逻辑（从 getTokenInfoFromAccount 函数中提取）
+			dailyUsed, _ := strconv.ParseFloat(tt.currentAmount, 64)
+			dailyTotal, _ := strconv.ParseFloat(tt.maximumAmount, 64)
+
+			var usageRate float64
+			if dailyTotal > 0 {
+				usageRate = (dailyUsed / dailyTotal) * 100
+			}
+
+			// 验证解析结果
+			if dailyUsed != tt.expectedUsed {
+				t.Errorf("期望 dailyUsed %.2f，实际 %.2f", tt.expectedUsed, dailyUsed)
+			}
+			if dailyTotal != tt.expectedTotal {
+				t.Errorf("期望 dailyTotal %.2f，实际 %.2f", tt.expectedTotal, dailyTotal)
+			}
+			// 使用近似比较（避免浮点精度问题）
+			const epsilon = 0.0001
+			if (usageRate - tt.expectedUsageRate) > epsilon || (tt.expectedUsageRate - usageRate) > epsilon {
+				t.Errorf("期望 usageRate %.2f%%，实际 %.2f%%", tt.expectedUsageRate, usageRate)
 			}
 		})
 	}

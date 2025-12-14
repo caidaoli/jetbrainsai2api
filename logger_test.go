@@ -29,10 +29,10 @@ func TestNewAppLoggerWithConfig(t *testing.T) {
 // TestAppLogger_Debug 测试调试日志
 func TestAppLogger_Debug(t *testing.T) {
 	tests := []struct {
-		name       string
-		debugMode  bool
-		message    string
-		expectLog  bool
+		name      string
+		debugMode bool
+		message   string
+		expectLog bool
 	}{
 		{
 			name:      "调试模式下输出",
