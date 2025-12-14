@@ -176,3 +176,243 @@ func TestConvertAssistantMessage_NoToolCalls(t *testing.T) {
 		t.Errorf("消息内容错误，期望 '这是一个普通的文本回复'，实际 '%s'", result[0].Content)
 	}
 }
+
+// TestConvertToolMessage 测试工具响应消息转换
+func TestConvertToolMessage(t *testing.T) {
+	tests := []struct {
+		name         string
+		toolCallID   string
+		funcName     string
+		content      any
+		expectResult bool
+	}{
+		{
+			name:         "正常工具响应",
+			toolCallID:   "call_123",
+			funcName:     "get_weather",
+			content:      `{"temperature": 25, "weather": "sunny"}`,
+			expectResult: true,
+		},
+		{
+			name:         "缺少函数名映射",
+			toolCallID:   "unknown_call",
+			funcName:     "", // 不在映射中
+			content:      "result",
+			expectResult: false,
+		},
+		{
+			name:         "复杂内容类型",
+			toolCallID:   "call_456",
+			funcName:     "search",
+			content:      []any{map[string]any{"type": "text", "text": "搜索结果"}},
+			expectResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: make(map[string]string),
+			}
+
+			// 如果有函数名，添加到映射
+			if tt.funcName != "" {
+				converter.toolIDToFuncNameMap[tt.toolCallID] = tt.funcName
+			}
+
+			msg := ChatMessage{
+				Role:       RoleTool,
+				ToolCallID: tt.toolCallID,
+				Content:    tt.content,
+			}
+
+			result := converter.convertToolMessage(msg)
+
+			if tt.expectResult {
+				if len(result) != 1 {
+					t.Errorf("期望生成 1 个消息，实际生成 %d 个", len(result))
+					return
+				}
+				if result[0].Type != JetBrainsMessageTypeTool {
+					t.Errorf("消息类型错误，期望 '%s'，实际 '%s'",
+						JetBrainsMessageTypeTool, result[0].Type)
+				}
+				if result[0].ID != tt.toolCallID {
+					t.Errorf("工具调用ID错误，期望 '%s'，实际 '%s'",
+						tt.toolCallID, result[0].ID)
+				}
+				if result[0].ToolName != tt.funcName {
+					t.Errorf("工具名称错误，期望 '%s'，实际 '%s'",
+						tt.funcName, result[0].ToolName)
+				}
+			} else {
+				if result != nil {
+					t.Errorf("期望返回 nil，实际返回 %v", result)
+				}
+			}
+		})
+	}
+}
+
+// TestConvertDefaultMessage 测试默认消息转换
+func TestConvertDefaultMessage(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     any
+		wantContent string
+	}{
+		{
+			name:        "字符串内容",
+			content:     "普通文本内容",
+			wantContent: "普通文本内容",
+		},
+		{
+			name: "复杂内容数组",
+			content: []any{
+				map[string]any{"type": "text", "text": "第一部分"},
+				map[string]any{"type": "text", "text": "第二部分"},
+			},
+			wantContent: "第一部分 第二部分",
+		},
+		{
+			name:        "空内容",
+			content:     "",
+			wantContent: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := &MessageConverter{
+				toolIDToFuncNameMap: make(map[string]string),
+			}
+
+			msg := ChatMessage{
+				Role:    "unknown", // 非标准角色
+				Content: tt.content,
+			}
+
+			result := converter.convertDefaultMessage(msg)
+
+			if len(result) != 1 {
+				t.Errorf("期望生成 1 个消息，实际生成 %d 个", len(result))
+				return
+			}
+
+			if result[0].Type != JetBrainsMessageTypeUser {
+				t.Errorf("消息类型错误，期望 '%s'，实际 '%s'",
+					JetBrainsMessageTypeUser, result[0].Type)
+			}
+
+			if result[0].Content != tt.wantContent {
+				t.Errorf("消息内容错误，期望 '%s'，实际 '%s'",
+					tt.wantContent, result[0].Content)
+			}
+		})
+	}
+}
+
+// TestConvertSystemMessage 测试系统消息转换
+func TestConvertSystemMessage(t *testing.T) {
+	converter := &MessageConverter{
+		toolIDToFuncNameMap: make(map[string]string),
+	}
+
+	msg := ChatMessage{
+		Role:    RoleSystem,
+		Content: "你是一个有帮助的助手",
+	}
+
+	result := converter.convertSystemMessage(msg)
+
+	if len(result) != 1 {
+		t.Errorf("期望生成 1 个消息，实际生成 %d 个", len(result))
+		return
+	}
+
+	if result[0].Type != JetBrainsMessageTypeSystem {
+		t.Errorf("消息类型错误，期望 '%s'，实际 '%s'",
+			JetBrainsMessageTypeSystem, result[0].Type)
+	}
+
+	if result[0].Content != "你是一个有帮助的助手" {
+		t.Errorf("消息内容错误")
+	}
+}
+
+// TestBuildToolIDMap 测试工具ID映射构建
+func TestBuildToolIDMap(t *testing.T) {
+	converter := &MessageConverter{
+		toolIDToFuncNameMap: make(map[string]string),
+	}
+
+	messages := []ChatMessage{
+		{
+			Role: RoleAssistant,
+			ToolCalls: []ToolCall{
+				{ID: "call_1", Function: Function{Name: "func_a"}},
+				{ID: "call_2", Function: Function{Name: "func_b"}},
+			},
+		},
+		{
+			Role:    RoleUser,
+			Content: "普通消息，不影响映射",
+		},
+		{
+			Role: RoleAssistant,
+			ToolCalls: []ToolCall{
+				{ID: "call_3", Function: Function{Name: "func_c"}},
+			},
+		},
+	}
+
+	converter.buildToolIDMap(messages)
+
+	// 验证映射
+	expected := map[string]string{
+		"call_1": "func_a",
+		"call_2": "func_b",
+		"call_3": "func_c",
+	}
+
+	for id, name := range expected {
+		if converter.toolIDToFuncNameMap[id] != name {
+			t.Errorf("工具ID %s 映射错误，期望 '%s'，实际 '%s'",
+				id, name, converter.toolIDToFuncNameMap[id])
+		}
+	}
+}
+
+// TestMessageConverterConvert 测试完整消息转换流程
+func TestMessageConverterConvert(t *testing.T) {
+	messages := []ChatMessage{
+		{Role: RoleSystem, Content: "系统提示"},
+		{Role: RoleUser, Content: "用户消息"},
+		{Role: RoleAssistant, Content: "助手回复"},
+	}
+
+	converter := &MessageConverter{
+		toolIDToFuncNameMap: make(map[string]string),
+		validator:           NewImageValidator(),
+	}
+
+	result := converter.Convert(messages)
+
+	if len(result) != 3 {
+		t.Errorf("期望生成 3 个消息，实际生成 %d 个", len(result))
+	}
+
+	// 验证消息类型顺序
+	expectedTypes := []string{
+		JetBrainsMessageTypeSystem,
+		JetBrainsMessageTypeUser,
+		JetBrainsMessageTypeAssistantText,
+	}
+
+	for i, expectedType := range expectedTypes {
+		if result[i].Type != expectedType {
+			t.Errorf("消息 %d 类型错误，期望 '%s'，实际 '%s'",
+				i, expectedType, result[i].Type)
+		}
+	}
+}
