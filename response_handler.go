@@ -25,6 +25,20 @@ func generateShortToolCallID() string {
 	return fmt.Sprintf("%s%s", ToolCallIDPrefix, hex.EncodeToString(bytes))
 }
 
+// mapJetbrainsToOpenAIFinishReason maps JetBrains finish reason to OpenAI format
+func mapJetbrainsToOpenAIFinishReason(jetbrainsReason string) string {
+	switch jetbrainsReason {
+	case JetBrainsFinishReasonToolCall:
+		return FinishReasonToolCalls
+	case JetBrainsFinishReasonLength:
+		return FinishReasonLength
+	case JetBrainsFinishReasonStop:
+		return FinishReasonStop
+	default:
+		return FinishReasonStop
+	}
+}
+
 // processJetbrainsStream processes the event stream from the JetBrains API.
 // It calls the provided onEvent function for each event in the stream.
 // Returns error if stream reading fails or context is cancelled.
@@ -167,6 +181,15 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				}
 			}
 		case JetBrainsEventTypeFinishMetadata:
+			// 解析上游 finish_reason
+			finishReason := FinishReasonStop
+			if reason, ok := data["reason"].(string); ok && reason != "" {
+				finishReason = mapJetbrainsToOpenAIFinishReason(reason)
+			} else if currentTool != nil {
+				// 兼容: 如果有工具调用但没有 reason 字段，默认为 tool_calls
+				finishReason = FinishReasonToolCalls
+			}
+
 			if currentTool != nil {
 				// Validate the tool call arguments before sending
 				if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
@@ -203,7 +226,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				Object:  ChatCompletionChunkObjectType,
 				Created: time.Now().Unix(),
 				Model:   request.Model,
-				Choices: []StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(FinishReasonToolCalls)}},
+				Choices: []StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(finishReason)}},
 			}
 
 			respJSON, err := marshalJSON(finalResp)

@@ -316,13 +316,18 @@ func (cs *CacheService) Close() error {
 // generateMessagesCacheKey creates a cache key from chat messages.
 // 包含版本号前缀，避免格式变更导致的缓存污染
 func generateMessagesCacheKey(messages []ChatMessage) string {
-	// 优化: 使用流式hash，避免大量内存分配
+	// 完整序列化消息以避免缓存碰撞
+	// 包含: Role, Content (任意类型), ToolCalls, ToolCallID
 	h := sha1.New()
 	for _, msg := range messages {
-		h.Write([]byte(msg.Role))
-		if content, ok := msg.Content.(string); ok {
-			h.Write([]byte(content))
+		// 序列化整个消息结构，确保所有字段都参与哈希
+		msgBytes, err := marshalJSON(msg)
+		if err != nil {
+			// 降级: 仅使用 Role (不应发生)
+			h.Write([]byte(msg.Role))
+			continue
 		}
+		h.Write(msgBytes)
 	}
 	return fmt.Sprintf("msg:%s:%s", CacheKeyVersion, hex.EncodeToString(h.Sum(nil)))
 }
@@ -330,11 +335,19 @@ func generateMessagesCacheKey(messages []ChatMessage) string {
 // generateToolsCacheKey creates a cache key from a slice of tools.
 // 包含版本号前缀，避免格式变更导致的缓存污染
 func generateToolsCacheKey(tools []Tool) string {
-	// 优化: 使用流式hash，避免大量内存分配
+	// 完整序列化工具定义以避免缓存碰撞
+	// 包含: Type, Function.Name, Function.Description, Function.Parameters
 	h := sha1.New()
 	for _, t := range tools {
-		h.Write([]byte(t.Type))
-		h.Write([]byte(t.Function.Name))
+		// 序列化整个工具结构，确保参数 schema 和描述都参与哈希
+		toolBytes, err := marshalJSON(t)
+		if err != nil {
+			// 降级: 仅使用 Type + Name (不应发生)
+			h.Write([]byte(t.Type))
+			h.Write([]byte(t.Function.Name))
+			continue
+		}
+		h.Write(toolBytes)
 	}
 	return fmt.Sprintf("tools:%s:%s", CacheKeyVersion, hex.EncodeToString(h.Sum(nil)))
 }
