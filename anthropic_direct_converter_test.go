@@ -293,3 +293,282 @@ func TestHasToolUse(t *testing.T) {
 		})
 	}
 }
+
+// TestHasToolResult 测试 hasToolResult 函数
+func TestHasToolResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  any
+		expected bool
+	}{
+		{
+			name:     "nil内容",
+			content:  nil,
+			expected: false,
+		},
+		{
+			name:     "字符串内容",
+			content:  "普通文本",
+			expected: false,
+		},
+		{
+			name: "只有text block",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "文本内容",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "包含tool_result block",
+			content: []any{
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_01",
+					"content":     "工具结果",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "混合text和tool_result",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "一些文本",
+				},
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_01",
+					"content":     "工具结果",
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasToolResult(tt.content)
+			if result != tt.expected {
+				t.Errorf("期望 %v，实际 %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestExtractMixedContent 测试 extractMixedContent 函数
+func TestExtractMixedContent(t *testing.T) {
+	tests := []struct {
+		name              string
+		content           any
+		toolIDToName      map[string]string
+		expectedToolCount int
+		expectedText      string
+	}{
+		{
+			name:              "空内容",
+			content:           nil,
+			toolIDToName:      map[string]string{},
+			expectedToolCount: 0,
+			expectedText:      "",
+		},
+		{
+			name: "只有文本",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "纯文本内容",
+				},
+			},
+			toolIDToName:      map[string]string{},
+			expectedToolCount: 0,
+			expectedText:      "纯文本内容",
+		},
+		{
+			name: "只有tool_result（字符串content）",
+			content: []any{
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_01",
+					"content":     "工具执行结果",
+				},
+			},
+			toolIDToName:      map[string]string{"toolu_01": "get_weather"},
+			expectedToolCount: 1,
+			expectedText:      "",
+		},
+		{
+			name: "tool_result带数组content",
+			content: []any{
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_02",
+					"content": []any{
+						map[string]any{"type": "text", "text": "第一部分"},
+						map[string]any{"type": "text", "text": "第二部分"},
+					},
+				},
+			},
+			toolIDToName:      map[string]string{"toolu_02": "search"},
+			expectedToolCount: 1,
+			expectedText:      "",
+		},
+		{
+			name: "混合text和tool_result",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "文本1",
+				},
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_01",
+					"content":     "结果",
+				},
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "文本2",
+				},
+			},
+			toolIDToName:      map[string]string{"toolu_01": "tool_a"},
+			expectedToolCount: 1,
+			expectedText:      "文本1 文本2",
+		},
+		{
+			name: "未知工具ID使用Unknown",
+			content: []any{
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "unknown_id",
+					"content":     "结果",
+				},
+			},
+			toolIDToName:      map[string]string{},
+			expectedToolCount: 1,
+			expectedText:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			toolMsgs, textContent := extractMixedContent(tt.content, tt.toolIDToName)
+
+			if len(toolMsgs) != tt.expectedToolCount {
+				t.Errorf("期望 %d 个工具消息，实际 %d 个", tt.expectedToolCount, len(toolMsgs))
+			}
+
+			if textContent != tt.expectedText {
+				t.Errorf("期望文本 '%s'，实际 '%s'", tt.expectedText, textContent)
+			}
+		})
+	}
+}
+
+// TestExtractToolInfo 测试 extractToolInfo 函数
+func TestExtractToolInfo(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    any
+		expectNil  bool
+		expectedID string
+	}{
+		{
+			name:      "nil内容",
+			content:   nil,
+			expectNil: true,
+		},
+		{
+			name:      "字符串内容",
+			content:   "普通文本",
+			expectNil: true,
+		},
+		{
+			name: "只有text block",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeText,
+					"text": "文本",
+				},
+			},
+			expectNil: true,
+		},
+		{
+			name: "包含tool_use",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_abc",
+					"name": "test_tool",
+				},
+			},
+			expectNil:  false,
+			expectedID: "toolu_abc",
+		},
+		{
+			name: "包含tool_result（字符串content）",
+			content: []any{
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_def",
+					"content":     "工具结果",
+				},
+			},
+			expectNil:  false,
+			expectedID: "toolu_def",
+		},
+		{
+			name: "包含tool_result（数组content）",
+			content: []any{
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_ghi",
+					"content": []any{
+						map[string]any{"type": "text", "text": "结果文本"},
+					},
+				},
+			},
+			expectNil:  false,
+			expectedID: "toolu_ghi",
+		},
+		{
+			name: "tool_use优先于tool_result",
+			content: []any{
+				map[string]any{
+					"type": ContentBlockTypeToolUse,
+					"id":   "toolu_first",
+					"name": "first_tool",
+				},
+				map[string]any{
+					"type":        ContentBlockTypeToolResult,
+					"tool_use_id": "toolu_second",
+					"content":     "结果",
+				},
+			},
+			expectNil:  false,
+			expectedID: "toolu_first",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractToolInfo(tt.content)
+
+			if tt.expectNil {
+				if result != nil {
+					t.Errorf("期望 nil，实际得到 %+v", result)
+				}
+			} else {
+				if result == nil {
+					t.Error("期望非nil结果，实际得到nil")
+					return
+				}
+				if result.ID != tt.expectedID {
+					t.Errorf("期望ID '%s'，实际 '%s'", tt.expectedID, result.ID)
+				}
+			}
+		})
+	}
+}
