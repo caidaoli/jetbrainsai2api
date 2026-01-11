@@ -198,74 +198,24 @@ func NewCacheService() *CacheService {
 	}
 }
 
-// GetQuotaCache 获取配额缓存 (修复 TOCTOU 竞态条件 - 返回深拷贝)
-// 注意：配额数据需要深拷贝，因为可能被外部修改（如更新 HasQuota 字段）
+// GetQuotaCache 获取配额缓存 (返回深拷贝防止外部修改)
 func (cs *CacheService) GetQuotaCache(key string) (*JetbrainsQuotaResponse, bool) {
 	cached, found := cs.quota.Get(key)
 	if !found {
 		return nil, false
 	}
 
-	// 深拷贝：防止返回的数据被外部修改
-	// 配额数据不是只读的，可能在账户检查时被修改，必须使用深拷贝
 	quotaData, ok := cached.(*JetbrainsQuotaResponse)
 	if !ok {
 		return nil, false
 	}
 
-	// 深拷贝 JetbrainsQuotaResponse
-	copied := &JetbrainsQuotaResponse{
-		Current: struct {
-			Current struct {
-				Amount string `json:"amount"`
-			} `json:"current"`
-			Maximum struct {
-				Amount string `json:"amount"`
-			} `json:"maximum"`
-		}{
-			Current: struct {
-				Amount string `json:"amount"`
-			}{
-				Amount: quotaData.Current.Current.Amount,
-			},
-			Maximum: struct {
-				Amount string `json:"amount"`
-			}{
-				Amount: quotaData.Current.Maximum.Amount,
-			},
-		},
-		Until: quotaData.Until,
-	}
-
-	return copied, true
+	return quotaData.Clone(), true
 }
 
-// SetQuotaCache 设置配额缓存
+// SetQuotaCache 设置配额缓存 (存储深拷贝确保隔离)
 func (cs *CacheService) SetQuotaCache(key string, value *JetbrainsQuotaResponse, duration time.Duration) {
-	// 存储时也进行深拷贝，确保完全隔离
-	copied := &JetbrainsQuotaResponse{
-		Current: struct {
-			Current struct {
-				Amount string `json:"amount"`
-			} `json:"current"`
-			Maximum struct {
-				Amount string `json:"amount"`
-			} `json:"maximum"`
-		}{
-			Current: struct {
-				Amount string `json:"amount"`
-			}{
-				Amount: value.Current.Current.Amount,
-			},
-			Maximum: struct {
-				Amount string `json:"amount"`
-			}{
-				Amount: value.Current.Maximum.Amount,
-			},
-		},
-		Until: value.Until,
-	}
-	cs.quota.Set(key, copied, duration)
+	cs.quota.Set(key, value.Clone(), duration)
 }
 
 // DeleteQuotaCache 删除配额缓存

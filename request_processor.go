@@ -104,7 +104,7 @@ func (p *RequestProcessor) ProcessTools(request *ChatCompletionRequest) ProcessT
 	// 缓存未命中或格式错误，执行验证
 	p.metrics.RecordCacheMiss()
 	validationStart := time.Now()
-	validatedTools, err := ValidateAndTransformToolsWithMetrics(request.Tools, p.cache, p.metrics, p.logger)
+	validatedTools, err := validateAndTransformTools(request.Tools, p.logger)
 	validationDuration := time.Since(validationStart)
 	p.metrics.RecordToolValidation(validationDuration)
 

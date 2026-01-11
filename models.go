@@ -22,6 +22,35 @@ type JetbrainsQuotaResponse struct {
 	Until string `json:"until"`
 }
 
+// Clone 返回 JetbrainsQuotaResponse 的深拷贝
+func (q *JetbrainsQuotaResponse) Clone() *JetbrainsQuotaResponse {
+	if q == nil {
+		return nil
+	}
+	return &JetbrainsQuotaResponse{
+		Current: struct {
+			Current struct {
+				Amount string `json:"amount"`
+			} `json:"current"`
+			Maximum struct {
+				Amount string `json:"amount"`
+			} `json:"maximum"`
+		}{
+			Current: struct {
+				Amount string `json:"amount"`
+			}{
+				Amount: q.Current.Current.Amount,
+			},
+			Maximum: struct {
+				Amount string `json:"amount"`
+			}{
+				Amount: q.Current.Maximum.Amount,
+			},
+		},
+		Until: q.Until,
+	}
+}
+
 // Data structures
 type RequestStats struct {
 	TotalRequests      int64           `json:"total_requests"`

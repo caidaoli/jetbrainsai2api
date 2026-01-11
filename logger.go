@@ -181,19 +181,12 @@ func createLogger() Logger {
 	}
 }
 
-// ==================== 全局日志实例（简化版）====================
-// 注意：新代码应通过依赖注入获取 Logger，避免使用全局函数
-//
-// 迁移状态：
-// ✅ main.go: 已迁移至 createLogger() + 配置注入
-// ✅ server.go: 已从 ServerConfig 获取 Logger 实例
-// ✅ request_processor.go: 已通过构造函数注入 Logger
-// ✅ response_handler.go: 已通过函数参数注入 Logger
-// ✅ handlers.go: 已使用 s.config.Logger
-// ⚠️  辅助模块: 保留全局日志函数（anthropic_*, config 等）
+// ==================== 全局日志实例 ====================
+// 用于辅助模块的便捷日志输出
+// 核心模块（Server, RequestProcessor, AccountManager）使用依赖注入
+// 辅助模块（converter, handler_helpers 等）可使用全局函数
 
-// defaultLogger 是全局日志实例，用于辅助模块的日志输出
-// 新代码应使用依赖注入，而非此全局实例
+// defaultLogger 是全局日志实例
 var defaultLogger = NewAppLoggerWithConfig(os.Stdout, isDebugMode())
 
 // isDebugMode 检查是否为调试模式
@@ -201,9 +194,7 @@ func isDebugMode() bool {
 	return IsDebug()
 }
 
-// ==================== 全局日志函数（向后兼容）====================
-// 这些函数用于尚未迁移到依赖注入的辅助模块
-// 新模块请通过构造函数注入 Logger 接口
+// ==================== 全局日志函数 ====================
 
 // Debug 全局调试日志函数
 func Debug(format string, args ...any) {

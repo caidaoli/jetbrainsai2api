@@ -155,7 +155,7 @@ func (am *PooledAccountManager) ensureAccountReady(
 	// 检查并刷新 JWT（如果需要）
 	if account.LicenseID != "" {
 		if account.JWT == "" || time.Now().After(account.ExpiryTime.Add(-JWTRefreshTime)) {
-			if err := am.refreshJWTInternal(account); err != nil {
+			if err := am.RefreshJWT(account); err != nil {
 				am.logger.Error("Failed to refresh JWT for %s (tried %d/%d accounts): %v",
 					getTokenDisplayName(account), len(triedAccounts), totalAccounts, err)
 				am.metrics.RecordAccountPoolError()
@@ -212,19 +212,6 @@ func (am *PooledAccountManager) GetAvailableCount() int {
 // RefreshJWT 刷新账户的 JWT token
 // 使用账户级互斥锁防止并发刷新同一账户
 func (am *PooledAccountManager) RefreshJWT(account *JetbrainsAccount) error {
-	account.mu.Lock()
-	defer account.mu.Unlock()
-
-	// 双重检查：可能已经被其他 goroutine 刷新了
-	if account.JWT != "" && time.Now().Before(account.ExpiryTime.Add(-JWTRefreshTime)) {
-		return nil // 已经是新的了
-	}
-
-	return refreshJetbrainsJWT(account, am.httpClient)
-}
-
-// refreshJWTInternal 内部 JWT 刷新实现（使用账户级锁）
-func (am *PooledAccountManager) refreshJWTInternal(account *JetbrainsAccount) error {
 	account.mu.Lock()
 	defer account.mu.Unlock()
 
