@@ -14,7 +14,7 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 	// 第一遍：建立工具 ID 到工具名称的映射
 	toolIDToName := make(map[string]string)
 	for _, msg := range anthMessages {
-		if msg.Role == RoleAssistant && hasToolUse(msg.Content) {
+		if msg.Role == RoleAssistant && hasContentBlockType(msg.Content, ContentBlockTypeToolUse) {
 			if contentArray, ok := msg.Content.([]any); ok {
 				for _, block := range contentArray {
 					if blockMap, ok := block.(map[string]any); ok {
@@ -34,7 +34,7 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 	// 第二遍：转换消息
 	for _, msg := range anthMessages {
 		// 特殊处理：检查是否为包含 tool_result 的混合内容消息
-		if msg.Role == RoleUser && hasToolResult(msg.Content) {
+		if msg.Role == RoleUser && hasContentBlockType(msg.Content, ContentBlockTypeToolResult) {
 			// 提取并分别处理 tool_result 和常规文本内容
 			toolMessages, textContent := extractMixedContent(msg.Content, toolIDToName)
 
@@ -58,7 +58,7 @@ func anthropicToJetbrainsMessages(anthMessages []AnthropicMessage) []JetbrainsMe
 			messageType = JetBrainsMessageTypeUser
 		case RoleAssistant:
 			// 检查是否包含工具调用
-			if hasToolUse(msg.Content) {
+			if hasContentBlockType(msg.Content, ContentBlockTypeToolUse) {
 				// 处理多工具调用：为每个 tool_use 生成一条 JetbrainsMessage
 				toolInfos := extractAllToolUse(msg.Content)
 				for _, toolInfo := range toolInfos {
@@ -150,26 +150,12 @@ func extractStringContent(content any) string {
 	return fmt.Sprintf("%v", content)
 }
 
-// hasToolUse 检查消息内容是否包含工具调用
-func hasToolUse(content any) bool {
+// hasContentBlockType 检查消息内容是否包含指定类型的内容块
+func hasContentBlockType(content any, targetType string) bool {
 	if contentArray, ok := content.([]any); ok {
 		for _, block := range contentArray {
 			if blockMap, ok := block.(map[string]any); ok {
-				if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeToolUse {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// hasToolResult 检查消息内容是否包含工具结果
-func hasToolResult(content any) bool {
-	if contentArray, ok := content.([]any); ok {
-		for _, block := range contentArray {
-			if blockMap, ok := block.(map[string]any); ok {
-				if blockType, _ := blockMap["type"].(string); blockType == ContentBlockTypeToolResult {
+				if blockType, _ := blockMap["type"].(string); blockType == targetType {
 					return true
 				}
 			}

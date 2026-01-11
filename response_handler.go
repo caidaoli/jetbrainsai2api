@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,15 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-
-// generateShortToolCallID generates a tool call ID in Anthropic format (toolu_xxx)
-func generateShortToolCallID() string {
-	// Generate 10 random bytes and encode as hex (20 chars) + "toolu_" prefix (6 chars) = 26 chars total
-	// Anthropic format: toolu_01G4sznjWs4orN79KqRAsQ5E (typically 22-26 chars)
-	bytes := make([]byte, 10)
-	_, _ = rand.Read(bytes)
-	return fmt.Sprintf("%s%s", ToolCallIDPrefix, hex.EncodeToString(bytes))
-}
 
 // mapJetbrainsToOpenAIFinishReason maps JetBrains finish reason to OpenAI format
 func mapJetbrainsToOpenAIFinishReason(jetbrainsReason string) string {
@@ -169,7 +158,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			if funcName != "" {
 				currentTool = &map[string]any{
 					"index": 0,
-					"id":    generateShortToolCallID(),
+					"id":    generateRandomID(ToolCallIDPrefix),
 					"function": map[string]any{
 						"arguments": "",
 						"name":      funcName,
@@ -338,7 +327,7 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 			} else if currentFuncName != "" {
 				// 后备方案：如果没有通过ToolCall事件创建，则创建一个
 				toolCall := ToolCall{
-					ID:   generateShortToolCallID(), // 后备方案
+					ID:   generateRandomID(ToolCallIDPrefix), // 后备方案
 					Type: ToolTypeFunction,
 					Function: Function{
 						Name:      currentFuncName,

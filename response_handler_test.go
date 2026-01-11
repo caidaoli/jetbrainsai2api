@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestGenerateShortToolCallID 测试工具调用ID生成
-func TestGenerateShortToolCallID(t *testing.T) {
-	id := generateShortToolCallID()
+// TestGenerateRandomID 测试随机ID生成
+func TestGenerateRandomID(t *testing.T) {
+	id := generateRandomID(ToolCallIDPrefix)
 
 	// 验证前缀
 	if !strings.HasPrefix(id, ToolCallIDPrefix) {
@@ -33,7 +33,7 @@ func TestGenerateShortToolCallID(t *testing.T) {
 	// 验证多次生成的ID不同（概率上）
 	ids := make(map[string]bool)
 	for i := 0; i < 100; i++ {
-		newID := generateShortToolCallID()
+		newID := generateRandomID(ToolCallIDPrefix)
 		if ids[newID] {
 			t.Errorf("生成了重复的ID: %s", newID)
 		}

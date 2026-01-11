@@ -229,35 +229,39 @@ func TestAnthropicToJetbrainsMessages_MultipleToolUse(t *testing.T) {
 	}
 }
 
-// TestHasToolUse 测试 hasToolUse 函数
-func TestHasToolUse(t *testing.T) {
+// TestHasContentBlockType 测试 hasContentBlockType 函数
+func TestHasContentBlockType(t *testing.T) {
 	tests := []struct {
-		name     string
-		content  any
-		expected bool
+		name       string
+		content    any
+		targetType string
+		expected   bool
 	}{
 		{
-			name:     "nil 内容",
-			content:  nil,
-			expected: false,
+			name:       "nil 内容检查 tool_use",
+			content:    nil,
+			targetType: ContentBlockTypeToolUse,
+			expected:   false,
 		},
 		{
-			name:     "字符串内容",
-			content:  "普通文本",
-			expected: false,
+			name:       "字符串内容检查 tool_use",
+			content:    "普通文本",
+			targetType: ContentBlockTypeToolUse,
+			expected:   false,
 		},
 		{
-			name: "只有 text block",
+			name: "只有 text block 检查 tool_use",
 			content: []any{
 				map[string]any{
 					"type": ContentBlockTypeText,
 					"text": "文本内容",
 				},
 			},
-			expected: false,
+			targetType: ContentBlockTypeToolUse,
+			expected:   false,
 		},
 		{
-			name: "包含 tool_use block",
+			name: "包含 tool_use block 检查 tool_use",
 			content: []any{
 				map[string]any{
 					"type": ContentBlockTypeToolUse,
@@ -265,10 +269,11 @@ func TestHasToolUse(t *testing.T) {
 					"name": "test_tool",
 				},
 			},
-			expected: true,
+			targetType: ContentBlockTypeToolUse,
+			expected:   true,
 		},
 		{
-			name: "混合 text 和 tool_use",
+			name: "混合 text 和 tool_use 检查 tool_use",
 			content: []any{
 				map[string]any{
 					"type": ContentBlockTypeText,
@@ -280,49 +285,34 @@ func TestHasToolUse(t *testing.T) {
 					"name": "test_tool",
 				},
 			},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := hasToolUse(tt.content)
-			if result != tt.expected {
-				t.Errorf("期望 %v，实际 %v", tt.expected, result)
-			}
-		})
-	}
-}
-
-// TestHasToolResult 测试 hasToolResult 函数
-func TestHasToolResult(t *testing.T) {
-	tests := []struct {
-		name     string
-		content  any
-		expected bool
-	}{
-		{
-			name:     "nil内容",
-			content:  nil,
-			expected: false,
+			targetType: ContentBlockTypeToolUse,
+			expected:   true,
 		},
 		{
-			name:     "字符串内容",
-			content:  "普通文本",
-			expected: false,
+			name:       "nil内容检查 tool_result",
+			content:    nil,
+			targetType: ContentBlockTypeToolResult,
+			expected:   false,
 		},
 		{
-			name: "只有text block",
+			name:       "字符串内容检查 tool_result",
+			content:    "普通文本",
+			targetType: ContentBlockTypeToolResult,
+			expected:   false,
+		},
+		{
+			name: "只有text block检查 tool_result",
 			content: []any{
 				map[string]any{
 					"type": ContentBlockTypeText,
 					"text": "文本内容",
 				},
 			},
-			expected: false,
+			targetType: ContentBlockTypeToolResult,
+			expected:   false,
 		},
 		{
-			name: "包含tool_result block",
+			name: "包含tool_result block检查 tool_result",
 			content: []any{
 				map[string]any{
 					"type":        ContentBlockTypeToolResult,
@@ -330,10 +320,11 @@ func TestHasToolResult(t *testing.T) {
 					"content":     "工具结果",
 				},
 			},
-			expected: true,
+			targetType: ContentBlockTypeToolResult,
+			expected:   true,
 		},
 		{
-			name: "混合text和tool_result",
+			name: "混合text和tool_result检查 tool_result",
 			content: []any{
 				map[string]any{
 					"type": ContentBlockTypeText,
@@ -345,13 +336,14 @@ func TestHasToolResult(t *testing.T) {
 					"content":     "工具结果",
 				},
 			},
-			expected: true,
+			targetType: ContentBlockTypeToolResult,
+			expected:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := hasToolResult(tt.content)
+			result := hasContentBlockType(tt.content, tt.targetType)
 			if result != tt.expected {
 				t.Errorf("期望 %v，实际 %v", tt.expected, result)
 			}

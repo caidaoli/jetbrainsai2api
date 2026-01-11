@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -133,8 +135,17 @@ func truncateString(s string, prefixLen, suffixLen int, replacement string) stri
 }
 
 // generateID 生成带前缀的唯一ID（基于纳秒时间戳）
+// 适用于需要时间序可追溯的场景，如响应ID、消息ID
 func generateID(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, time.Now().UnixNano())
+}
+
+// generateRandomID 生成带前缀的随机ID（基于加密安全随机数）
+// 适用于需要不可预测性的场景，如工具调用ID
+func generateRandomID(prefix string) string {
+	bytes := make([]byte, 10)
+	_, _ = rand.Read(bytes)
+	return fmt.Sprintf("%s%s", prefix, hex.EncodeToString(bytes))
 }
 
 // getTokenDisplayName 获取账户的显示名称（用于日志）
