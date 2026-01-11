@@ -83,13 +83,14 @@ func (s *Server) chatCompletions(c *gin.Context) {
 
 	// 步骤 5: 发送上游请求
 	// SRP: 职责分离 - HTTP 请求发送由 RequestProcessor 负责
+	//nolint:bodyclose // resp.Body 在下方 defer resp.Body.Close() 关闭
 	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, account)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
 		respondWithOpenAIError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 步骤 6: 检查响应状态
 	if resp.StatusCode != http.StatusOK {

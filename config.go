@@ -51,7 +51,7 @@ func DefaultHTTPClientSettings() HTTPClientSettings {
 func loadModels(path string) (ModelsData, error) {
 	var result ModelsData
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path 来自配置文件，非用户输入
 	if err != nil {
 		return result, fmt.Errorf("failed to read %s: %w", path, err)
 	}

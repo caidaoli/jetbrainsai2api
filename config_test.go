@@ -212,13 +212,13 @@ func TestLoadModels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("创建临时文件失败: %v", err)
 			}
-			defer os.Remove(tmpFile.Name())
+			defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 			// 写入测试内容
 			if _, err := tmpFile.WriteString(tt.fileContent); err != nil {
 				t.Fatalf("写入临时文件失败: %v", err)
 			}
-			tmpFile.Close()
+			_ = tmpFile.Close()
 
 			// 执行测试
 			result, err := loadModels(tmpFile.Name())

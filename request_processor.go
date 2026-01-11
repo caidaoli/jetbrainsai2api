@@ -243,6 +243,3 @@ func (p *RequestProcessor) SendUpstreamRequest(
 
 	return resp, nil
 }
-
-// 全局请求处理器实例已废弃 - 现在通过 Server 结构注入
-// 保留此注释以维持向后兼容性

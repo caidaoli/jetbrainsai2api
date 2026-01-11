@@ -188,6 +188,7 @@ func extractMixedContent(content any, toolIDToName map[string]string) ([]Jetbrai
 			if blockMap, ok := block.(map[string]any); ok {
 				blockType, _ := blockMap["type"].(string)
 
+				//nolint:staticcheck // QF1003: if-else 比 switch 在此场景更易读
 				if blockType == ContentBlockTypeToolResult {
 					// 创建 tool_message
 					toolMsg := JetbrainsMessage{
@@ -258,6 +259,7 @@ func extractToolInfo(content any) *ToolInfo {
 			if blockMap, ok := block.(map[string]any); ok {
 				blockType, _ := blockMap["type"].(string)
 
+				//nolint:staticcheck // QF1003: if-else 比 switch 在此场景更易读
 				if blockType == ContentBlockTypeToolUse {
 					toolInfo := &ToolInfo{}
 					if id, ok := blockMap["id"].(string); ok {

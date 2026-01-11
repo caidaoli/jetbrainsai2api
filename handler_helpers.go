@@ -111,7 +111,7 @@ func withPanicRecoveryWithMetrics(
 
 			// 确保资源释放
 			if resp != nil && *resp != nil && (*resp).Body != nil {
-				(*resp).Body.Close()
+				_ = (*resp).Body.Close()
 			}
 			if account != nil && *account != nil && accountManager != nil {
 				accountManager.ReleaseAccount(*account)

@@ -162,7 +162,7 @@ func GetModelsConfig(path string) (ModelsData, ModelsConfig, error) {
 		return modelsData, ModelsConfig{}, fmt.Errorf("failed to load models: %w", err)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path 来自配置常量，非用户输入
 	if err != nil {
 		return modelsData, ModelsConfig{}, err
 	}
@@ -245,7 +245,7 @@ func (s *Server) setupGracefulShutdown() {
 
 		// 停止缓存服务
 		if s.cache != nil {
-			s.cache.Close()
+			_ = s.cache.Close()
 		}
 
 		// 关闭账户管理器
@@ -255,7 +255,7 @@ func (s *Server) setupGracefulShutdown() {
 
 		// 关闭日志（如果是 AppLogger 实例）
 		if appLog, ok := s.config.Logger.(*AppLogger); ok {
-			appLog.Close()
+			_ = appLog.Close()
 		}
 
 		s.config.Logger.Info("Graceful shutdown completed")

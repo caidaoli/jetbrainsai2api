@@ -26,6 +26,9 @@ GIN_MODE=release ./jetbrainsai2api
 
 # 代码检查
 go fmt ./... && go vet ./...
+
+# 代码质量检查（推荐）
+golangci-lint run
 ```
 
 ### 测试

@@ -27,7 +27,7 @@ func TestPooledAccountManager_BasicAcquireRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	// 获取账户
 	ctx := context.Background()
@@ -71,7 +71,7 @@ func TestPooledAccountManager_ConcurrentAcquire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	const numGoroutines = 10
 	var wg sync.WaitGroup
@@ -124,7 +124,7 @@ func TestPooledAccountManager_AcquireTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	// 占用唯一账户
 	ctx := context.Background()
@@ -167,7 +167,7 @@ func TestPooledAccountManager_ContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	// 占用唯一账户
 	account1, _ := am.AcquireAccount(context.Background())
@@ -209,7 +209,7 @@ func TestPooledAccountManager_ReleaseNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	// 释放 nil 不应该 panic
 	am.ReleaseAccount(nil)
@@ -236,7 +236,7 @@ func TestPooledAccountManager_GetAccountCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	if am.GetAccountCount() != 3 {
 		t.Errorf("Expected 3 total accounts, got %d", am.GetAccountCount())
@@ -293,7 +293,7 @@ func TestPooledAccountManager_GetAllAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)
 	}
-	defer am.Close()
+	defer func() { _ = am.Close() }()
 
 	allAccounts := am.GetAllAccounts()
 	if len(allAccounts) != 2 {

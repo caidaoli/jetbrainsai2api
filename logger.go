@@ -134,6 +134,7 @@ func createDebugFileOutput() (io.Writer, *os.File) {
 	}
 
 	// 尝试打开文件，使用安全标志
+	//nolint:gosec // G304: debugFile 来自环境变量且已通过 containsPathTraversal 验证
 	file, err := os.OpenFile(debugFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, FilePermissionReadWrite)
 	if err != nil {
 		log.Printf("[WARN] Failed to open DEBUG_FILE '%s': %v, falling back to stdout", debugFile, err)

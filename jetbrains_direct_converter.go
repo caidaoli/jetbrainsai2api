@@ -25,7 +25,7 @@ func parseJetbrainsToAnthropicDirect(body []byte, model string) (*AnthropicMessa
 
 	// 直接构建 Anthropic 响应
 	var content []AnthropicContentBlock
-	var stopReason string = StopReasonEndTurn
+	stopReason := StopReasonEndTurn
 
 	// 提取文本内容
 	if contentField, exists := jetbrainsResp["content"]; exists {
@@ -63,7 +63,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 	var content []AnthropicContentBlock
 	var currentToolCall *AnthropicContentBlock
 	var textParts []string
-	var finishReason string = StopReasonEndTurn
+	finishReason := StopReasonEndTurn
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)

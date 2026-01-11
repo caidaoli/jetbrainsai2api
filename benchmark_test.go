@@ -95,7 +95,7 @@ func BenchmarkToolsValidation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		validateAndTransformTools(tools, logger)
+		_, _ = validateAndTransformTools(tools, logger)
 	}
 }
 
@@ -154,7 +154,7 @@ func BenchmarkJSONMarshal(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		marshalJSON(resp)
+		_, _ = marshalJSON(resp)
 	}
 }
 

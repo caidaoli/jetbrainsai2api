@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to initialize storage: %v", err)
 	}
-	defer storageInstance.Close()
+	defer func() { _ = storageInstance.Close() }()
 
 	// 从环境变量加载服务器配置
 	config, err := loadServerConfigFromEnv()

@@ -21,7 +21,7 @@ func generateShortToolCallID() string {
 	// Generate 10 random bytes and encode as hex (20 chars) + "toolu_" prefix (6 chars) = 26 chars total
 	// Anthropic format: toolu_01G4sznjWs4orN79KqRAsQ5E (typically 22-26 chars)
 	bytes := make([]byte, 10)
-	rand.Read(bytes)
+	_, _ = rand.Read(bytes)
 	return fmt.Sprintf("%s%s", ToolCallIDPrefix, hex.EncodeToString(bytes))
 }
 
@@ -128,7 +128,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				logger.Warn("Failed to marshal stream response: %v", err)
 				return true // Continue processing next event
 			}
-			writeSSEData(c.Writer, respJSON)
+			_, _ = writeSSEData(c.Writer, respJSON)
 			c.Writer.Flush()
 		case JetBrainsEventTypeToolCall:
 			// 处理新的ToolCall格式 - 使用上游提供的ID
@@ -219,7 +219,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 					logger.Warn("Failed to marshal tool call response: %v", err)
 					return true // Continue processing next event
 				}
-				writeSSEData(c.Writer, respJSON)
+				_, _ = writeSSEData(c.Writer, respJSON)
 				c.Writer.Flush()
 			}
 
@@ -236,8 +236,8 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				logger.Warn("Failed to marshal final response: %v", err)
 				return false
 			}
-			writeSSEData(c.Writer, respJSON)
-			writeSSEDone(c.Writer)
+			_, _ = writeSSEData(c.Writer, respJSON)
+			_, _ = writeSSEDone(c.Writer)
 			c.Writer.Flush()
 			return false // Stop processing
 		}

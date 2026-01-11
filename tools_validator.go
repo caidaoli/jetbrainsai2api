@@ -43,18 +43,21 @@ func validateAndTransformTools(tools []Tool, logger Logger) ([]Tool, error) {
 	}
 
 	validatedTools := make([]Tool, 0, len(tools))
+	skippedCount := 0
 
 	for _, tool := range tools {
 		// 验证工具名称
 		if !isValidParamName(tool.Function.Name) {
-			logger.Debug("Invalid tool name: %s, skipping tool", tool.Function.Name)
+			logger.Warn("Skipping tool with invalid name: %s (must match %s)", tool.Function.Name, ParamNamePattern)
+			skippedCount++
 			continue
 		}
 
 		// 转换参数 Schema
 		transformedParams, err := transformParameters(tool.Function.Parameters)
 		if err != nil {
-			logger.Debug("Failed to transform tool %s parameters: %v", tool.Function.Name, err)
+			logger.Warn("Skipping tool %s: parameter transformation failed: %v", tool.Function.Name, err)
+			skippedCount++
 			continue
 		}
 
@@ -69,6 +72,11 @@ func validateAndTransformTools(tools []Tool, logger Logger) ([]Tool, error) {
 		}
 
 		validatedTools = append(validatedTools, validatedTool)
+	}
+
+	// 如果有工具被跳过，记录汇总信息
+	if skippedCount > 0 {
+		logger.Warn("Tool validation: %d/%d tools skipped due to validation errors", skippedCount, len(tools))
 	}
 
 	return validatedTools, nil

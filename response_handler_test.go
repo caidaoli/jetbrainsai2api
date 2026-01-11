@@ -23,7 +23,9 @@ func TestGenerateShortToolCallID(t *testing.T) {
 	// 验证hex部分只包含有效字符
 	hexPart := id[len(ToolCallIDPrefix):]
 	for _, c := range hexPart {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		isDigit := c >= '0' && c <= '9'
+		isHexLower := c >= 'a' && c <= 'f'
+		if !isDigit && !isHexLower {
 			t.Errorf("hex部分包含无效字符: %c", c)
 		}
 	}

@@ -107,6 +107,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 
 	// 直接调用 JetBrains API
 	var statusCode int
+	//nolint:bodyclose // resp.Body 在 handleAnthropicStreamingResponseWithMetrics 和 handleAnthropicNonStreamingResponseWithMetrics 中关闭
 	resp, statusCode, err = s.callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
@@ -178,7 +179,7 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
-		resp.Body.Close() // 关闭原始 body，避免资源泄漏
+		_ = resp.Body.Close() // 关闭原始 body，避免资源泄漏
 		errorMsg := string(body)
 		Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
 

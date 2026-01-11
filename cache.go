@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: sha1 用于缓存键生成，非安全目的
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -265,7 +265,7 @@ func (cs *CacheService) Close() error {
 func generateMessagesCacheKey(messages []ChatMessage) string {
 	// 完整序列化消息以避免缓存碰撞
 	// 包含: Role, Content (任意类型), ToolCalls, ToolCallID
-	h := sha1.New()
+	h := sha1.New() //nolint:gosec // G401: sha1 用于缓存键，非安全目的
 	for _, msg := range messages {
 		// 序列化整个消息结构，确保所有字段都参与哈希
 		msgBytes, err := marshalJSON(msg)
@@ -284,7 +284,7 @@ func generateMessagesCacheKey(messages []ChatMessage) string {
 func generateToolsCacheKey(tools []Tool) string {
 	// 完整序列化工具定义以避免缓存碰撞
 	// 包含: Type, Function.Name, Function.Description, Function.Parameters
-	h := sha1.New()
+	h := sha1.New() //nolint:gosec // G401: sha1 用于缓存键，非安全目的
 	for _, t := range tools {
 		// 序列化整个工具结构，确保参数 schema 和描述都参与哈希
 		toolBytes, err := marshalJSON(t)

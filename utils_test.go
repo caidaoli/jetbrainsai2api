@@ -412,11 +412,11 @@ func TestGetEnvWithDefault(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// 清理可能的旧环境变量
-			os.Unsetenv(tt.key)
+			_ = os.Unsetenv(tt.key)
 
 			if tt.setEnv {
-				os.Setenv(tt.key, tt.setValue)
-				defer os.Unsetenv(tt.key)
+				_ = os.Setenv(tt.key, tt.setValue)
+				defer func() { _ = os.Unsetenv(tt.key) }()
 			}
 
 			result := getEnvWithDefault(tt.key, tt.defaultValue)

@@ -37,7 +37,7 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 	}
 
 	if resp.StatusCode == HTTPStatusUnauthorized && account.LicenseID != "" {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		Info("JWT for %s expired, refreshing...", getTokenDisplayName(account))
 
 		// 刷新 JWT（账户已被当前 goroutine 独占，无需锁）
@@ -106,7 +106,7 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))
@@ -151,9 +151,6 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 
 	return fmt.Errorf("JWT refresh failed: invalid response state %s", state)
 }
-
-// getNextJetbrainsAccount 已废弃 - 使用 AccountManager.AcquireAccount 替代
-// 保留此函数签名以维持向后兼容性，但不应再使用
 
 // processQuotaData processes quota data and updates account status
 func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccount) {
@@ -221,7 +218,7 @@ func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cach
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))

@@ -14,21 +14,21 @@ import (
 
 // handleAnthropicStreamingResponseWithMetrics 处理流式响应 (Anthropic 格式，带注入的 MetricsService)
 func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 设置 Anthropic 流式响应头
 	setStreamingHeaders(c, APIFormatAnthropic)
 
 	// 发送 message_start 事件
 	messageStartData := generateAnthropicStreamResponse(StreamEventTypeMessageStart, "", 0)
-	c.Writer.Write([]byte(AnthropicEventMessageStart))
-	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(messageStartData))))
+	_, _ = c.Writer.Write([]byte(AnthropicEventMessageStart))
+	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(messageStartData))
 	c.Writer.Flush()
 
 	// 发送 content_block_start 事件
 	contentBlockStartData := generateAnthropicStreamResponse(StreamEventTypeContentBlockStart, "", 0)
-	c.Writer.Write([]byte(AnthropicEventContentBlockStart))
-	c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(contentBlockStartData))))
+	_, _ = c.Writer.Write([]byte(AnthropicEventContentBlockStart))
+	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(contentBlockStartData))
 	c.Writer.Flush()
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -137,14 +137,14 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 
 	// 发送 content_block_stop 事件
 	contentBlockStopData := generateAnthropicStreamResponse(StreamEventTypeContentBlockStop, "", 0)
-	c.Writer.Write([]byte(AnthropicEventContentBlockStop))
-	c.Writer.Write([]byte(fmt.Sprintf("%s%s\n\n", StreamChunkPrefix, string(contentBlockStopData))))
+	_, _ = c.Writer.Write([]byte(AnthropicEventContentBlockStop))
+	_, _ = fmt.Fprintf(c.Writer, "%s%s\n\n", StreamChunkPrefix, string(contentBlockStopData))
 	c.Writer.Flush()
 
 	// 发送 message_stop 事件
 	messageStopData := generateAnthropicStreamResponse(StreamEventTypeMessageStop, "", 0)
-	c.Writer.Write([]byte(AnthropicEventMessageStop))
-	c.Writer.Write([]byte(fmt.Sprintf("%s%s\n\n", StreamChunkPrefix, string(messageStopData))))
+	_, _ = c.Writer.Write([]byte(AnthropicEventMessageStop))
+	_, _ = fmt.Fprintf(c.Writer, "%s%s\n\n", StreamChunkPrefix, string(messageStopData))
 	c.Writer.Flush()
 
 	if hasContent {
@@ -158,7 +158,7 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 
 // handleAnthropicNonStreamingResponseWithMetrics 处理非流式响应 (Anthropic 格式，带注入的 MetricsService)
 func handleAnthropicNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 读取完整响应
 	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodySize))

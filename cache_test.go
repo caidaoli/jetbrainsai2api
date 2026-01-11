@@ -310,7 +310,7 @@ func TestNewCacheService(t *testing.T) {
 	if service == nil {
 		t.Fatal("NewCacheService should not return nil")
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	// 验证内部缓存已初始化
 	if service.general == nil {
@@ -324,7 +324,7 @@ func TestNewCacheService(t *testing.T) {
 // TestCacheService_QuotaCache 测试配额缓存操作
 func TestCacheService_QuotaCache(t *testing.T) {
 	service := NewCacheService()
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	quotaResponse := &JetbrainsQuotaResponse{
 		Until: "1000",
@@ -343,7 +343,7 @@ func TestCacheService_QuotaCache(t *testing.T) {
 		t.Error("配额缓存应该被找到")
 	}
 	if result == nil {
-		t.Error("返回的配额数据不应该为nil")
+		t.Fatal("返回的配额数据不应该为nil")
 	}
 	if result.Current.Current.Amount != "100" {
 		t.Errorf("配额当前值错误，期望 '100'，实际 '%s'", result.Current.Current.Amount)
@@ -360,7 +360,7 @@ func TestCacheService_QuotaCache(t *testing.T) {
 // TestCacheService_QuotaCacheDeepCopy 测试配额缓存深拷贝
 func TestCacheService_QuotaCacheDeepCopy(t *testing.T) {
 	service := NewCacheService()
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	quotaResponse := &JetbrainsQuotaResponse{
 		Until: "1000",
@@ -385,7 +385,7 @@ func TestCacheService_QuotaCacheDeepCopy(t *testing.T) {
 // TestCacheService_ClearQuotaCache 测试清除所有配额缓存
 func TestCacheService_ClearQuotaCache(t *testing.T) {
 	service := NewCacheService()
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	// 添加多个配额缓存
 	keys := []string{"quota:v1:license-1", "quota:v1:license-2", "quota:v1:license-3"}
@@ -420,7 +420,7 @@ func TestCacheService_ClearQuotaCache(t *testing.T) {
 // TestCacheService_GetSet 测试通用缓存操作
 func TestCacheService_GetSet(t *testing.T) {
 	service := NewCacheService()
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	// 测试 Set
 	service.Set("test-key", "test-value", 1*time.Hour)
@@ -457,7 +457,7 @@ func TestCacheService_Close(t *testing.T) {
 	service.Set("key1", "value1", 1*time.Hour)
 
 	// 关闭服务
-	service.Close()
+	_ = service.Close()
 
 	// Close 应该能正常执行而不 panic
 }
@@ -801,7 +801,7 @@ func TestGenerateToolsCacheKey_EmptyTools(t *testing.T) {
 // TestCacheService_QuotaCache_Expiration 测试配额缓存过期
 func TestCacheService_QuotaCache_Expiration(t *testing.T) {
 	service := NewCacheService()
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	quotaResponse := &JetbrainsQuotaResponse{
 		Until: "2099-12-31",
