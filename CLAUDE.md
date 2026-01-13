@@ -106,8 +106,8 @@ HTTP 请求 → Server → RequestProcessor → JetBrains API
 - 可选 Redis 后端（分布式场景）
 - 统一 JSON 序列化：`marshalJSON()` 封装 Sonic 库
 
-**性能监控** (`stats.go`, `performance.go`, `storage.go`):
-- 实时指标：QPS、响应时间、成功率、错误率
+**性能监控** (`metrics.go`, `storage.go`):
+- 实时指标：QPS、响应时间、成功率、错误率 (MetricsService, PerformanceMetrics, AtomicRequestStats)
 - 统计数据异步持久化（防抖机制）
 - Web 监控面板：`/` (HTML), `/api/stats` (JSON)
 
