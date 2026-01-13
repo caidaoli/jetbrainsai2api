@@ -5,8 +5,6 @@ import (
 	"log"
 	"os"
 	"sync"
-
-	"github.com/gin-gonic/gin"
 )
 
 // ==================== Logger接口定义 ====================
@@ -30,17 +28,6 @@ type AppLogger struct {
 	debug      bool
 	fileHandle *os.File     // 可能为nil
 	mu         sync.RWMutex // 保护文件句柄操作
-}
-
-// NewAppLogger 创建新的日志实例
-// 支持依赖注入，可传入自定义输出和配置
-func NewAppLogger() *AppLogger {
-	output, fileHandle := createDebugFileOutput()
-	return &AppLogger{
-		logger:     log.New(output, "", log.LstdFlags),
-		debug:      gin.Mode() == gin.DebugMode,
-		fileHandle: fileHandle,
-	}
 }
 
 // NewAppLoggerWithConfig 创建带配置的日志实例
@@ -188,12 +175,7 @@ func createLogger() Logger {
 // 辅助模块（converter, handler_helpers 等）可使用全局函数
 
 // defaultLogger 是全局日志实例
-var defaultLogger = NewAppLoggerWithConfig(os.Stdout, isDebugMode())
-
-// isDebugMode 检查是否为调试模式
-func isDebugMode() bool {
-	return IsDebug()
-}
+var defaultLogger = NewAppLoggerWithConfig(os.Stdout, IsDebug())
 
 // ==================== 全局日志函数 ====================
 

@@ -232,8 +232,8 @@ func TestContainsPathTraversal(t *testing.T) {
 	}
 }
 
-// TestIsDebugMode 测试调试模式检测
-func TestIsDebugMode(t *testing.T) {
+// TestIsDebug 测试调试模式检测
+func TestIsDebug(t *testing.T) {
 	// 保存原始值
 	originalMode := gin.Mode()
 	defer gin.SetMode(originalMode)
@@ -263,9 +263,9 @@ func TestIsDebugMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gin.SetMode(tt.ginMode)
-			result := isDebugMode()
+			result := IsDebug()
 			if result != tt.expected {
-				t.Errorf("isDebugMode() = %v，期望 %v (GIN_MODE=%s)",
+				t.Errorf("IsDebug() = %v，期望 %v (GIN_MODE=%s)",
 					result, tt.expected, tt.ginMode)
 			}
 		})
