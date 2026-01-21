@@ -4,30 +4,35 @@
         "claude-haiku-4-5-20251001": "anthropic-claude-4-5-haiku",
         "claude-opus-4-5-20251101": "anthropic-claude-4-5-opus",
 
-        "gemini-3.0-pro": "google-gemini-3-0-pro",
         "gemini-2.5-pro": "google-chat-gemini-pro-2.5",
         "gemini-2.5-flash": "google-chat-gemini-flash-2.5",
         "gemini-2.5-flash-lite": "google-chat-gemini-flash-lite-2.5",
+        "gemini-3.0-pro": "google-gemini-3-0-pro",
+        "gemini-3.0-flash": "google-gemini-3-0-flash",
+
+        "gpt-4.1": "openai-gpt4.1",
+        "gpt-4.1-mini": "openai-gpt4.1-mini",
+        "gpt-4.1-nano": "openai-gpt4.1-nano",
+        "gpt-5": "openai-gpt-5",
+        "gpt-5-mini": "openai-gpt-5-mini",
+        "gpt-5-nano": "openai-gpt-5-nano",
+        "gpt-5-codex": "openai-gpt-5-codex",
+        "gpt-5.1": "openai-gpt-5-1",
+        "gpt-5.1-codex": "openai-gpt-5-1-codex",
+        "gpt-5.1-codex-mini": "openai-gpt-5-1-codex-mini",
+        "gpt-5.1-codex-max": "openai-gpt-5-1-codex-max",
+        "gpt-5.2": "openai-gpt-5-2",
+        "gpt-5.2-codex": "openai-gpt-5-2-codex",
 
         "o1": "openai-o1",
         "o3": "openai-o3",
         "o3-mini": "openai-o3-mini",
-        "gpt-4o": "openai-gpt-4o",
-        "gpt-4o-mini": "openai-o4-mini",
-        "gpt-4.1": "openai-gpt4.1",
-        "gpt-4.1-mini": "openai-gpt4.1-mini",
-        "gpt-5": "openai-gpt-5",
-        "gpt-5-codex": "openai-gpt-5-codex",
-        "gpt-5.2": "openai-gpt-5-1",
-        "gpt-5.1": "openai-gpt-5-1",
-        "gpt-5.1-codex": "openai-gpt-5-1-codex",
-        "gpt-5.1-codex-max": "openai-gpt-5-1-codex-max",
-        "gpt-5.1-codex-mini": "openai-gpt-5-1-codex-mini",
-        "gpt-5-mini": "openai-gpt-5-mini",
-        
+        "o4-mini": "openai-o4-mini",
+
         "grok-4": "xai-grok-4",
         "grok-4-fast": "xai-grok-4-fast",
         "grok-code-fast": "xai-grok-code-fast-1",
-        "grok-4.1-fast": "xai-grok-4-1-fast"
+        "grok-4.1-fast": "xai-grok-4-1-fast",
+        "grok-4.1-fast-non-reasoning": "xai-grok-4-1-fast-non-reasoning"
     }
 }
