@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	// Panic 恢复机制和性能追踪
 	var account *JetbrainsAccount
 	var resp *http.Response
-	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &account, &resp, s.accountManager, APIFormatAnthropic)()
+	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &resp, APIFormatAnthropic)()
 	defer trackPerformanceWithMetrics(s.metricsService, startTime)()
 
 	var anthReq AnthropicMessagesRequest
@@ -108,7 +109,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	// 直接调用 JetBrains API
 	var statusCode int
 	//nolint:bodyclose // resp.Body 在 handleAnthropicStreamingResponseWithMetrics 和 handleAnthropicNonStreamingResponseWithMetrics 中关闭
-	resp, statusCode, err = s.callJetbrainsAPIDirect(&anthReq, jetbrainsMessages, data, account, startTime, accountIdentifier)
+	resp, statusCode, err = s.callJetbrainsAPIDirect(c.Request.Context(), &anthReq, jetbrainsMessages, data, account)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
 		respondWithAnthropicError(c, statusCode, AnthropicErrorAPI, err.Error())
@@ -126,7 +127,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 
 // callJetbrainsAPIDirect 直接调用 JetBrains API
 // KISS: 简化调用链，消除中间转换
-func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbrainsMessages []JetbrainsMessage, data []JetbrainsData, account *JetbrainsAccount, startTime time.Time, accountIdentifier string) (*http.Response, int, error) {
+func (s *Server) callJetbrainsAPIDirect(ctx context.Context, anthReq *AnthropicMessagesRequest, jetbrainsMessages []JetbrainsMessage, data []JetbrainsData, account *JetbrainsAccount) (*http.Response, int, error) {
 	internalModel := getInternalModelName(s.modelsConfig, anthReq.Model)
 	payload := JetbrainsPayload{
 		Prompt:  JetBrainsChatPrompt,
@@ -141,7 +142,7 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 
 	payloadBytes, err := marshalJSON(payload)
 	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to marshal request")
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	Debug("=== JetBrains API Request Debug (Direct) ===")
@@ -154,9 +155,9 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 	Debug("=== End Upstream Payload ===")
 	Debug("=== End Debug ===")
 
-	req, err := http.NewRequest(http.MethodPost, JetBrainsChatEndpoint, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, JetBrainsChatEndpoint, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create request")
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set(HeaderAccept, ContentTypeEventStream)
@@ -166,15 +167,14 @@ func (s *Server) callJetbrainsAPIDirect(anthReq *AnthropicMessagesRequest, jetbr
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("failed to make request")
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to make request: %w", err)
 	}
 
 	Debug("JetBrains API Response Status: %d", resp.StatusCode)
 
 	if resp.StatusCode == JetBrainsStatusQuotaExhausted {
 		Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
-		account.HasQuota = false
-		account.LastQuotaCheck = float64(time.Now().Unix())
+		markAccountNoQuota(account)
 	}
 
 	if resp.StatusCode != http.StatusOK {

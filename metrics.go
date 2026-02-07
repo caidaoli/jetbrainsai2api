@@ -20,6 +20,7 @@ type AtomicRequestStats struct {
 	// 请求历史使用无锁的 channel 缓冲
 	historyChannel chan RequestRecord
 	historyBuffer  []RequestRecord
+	historyLimit   int
 	historyMutex   sync.RWMutex // 仅在读取历史时使用
 
 	lastRequestTime atomic.Value // 存储 time.Time
@@ -30,11 +31,16 @@ type AtomicRequestStats struct {
 }
 
 // NewAtomicRequestStats 创建新的原子统计结构
-func NewAtomicRequestStats() *AtomicRequestStats {
+func NewAtomicRequestStats(historySize int) *AtomicRequestStats {
+	if historySize <= 0 {
+		historySize = HistoryBufferSize
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	stats := &AtomicRequestStats{
-		historyChannel: make(chan RequestRecord, HistoryBufferSize),
-		historyBuffer:  make([]RequestRecord, 0, HistoryBufferSize),
+		historyChannel: make(chan RequestRecord, historySize),
+		historyBuffer:  make([]RequestRecord, 0, historySize),
+		historyLimit:   historySize,
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -94,9 +100,9 @@ func (s *AtomicRequestStats) flushHistoryBatch(batch []RequestRecord) {
 
 	for _, record := range batch {
 		s.historyBuffer = append(s.historyBuffer, record)
-		if len(s.historyBuffer) > HistoryBufferSize {
-			// 保留最新的 HistoryBufferSize 条记录
-			s.historyBuffer = s.historyBuffer[len(s.historyBuffer)-HistoryBufferSize:]
+		if len(s.historyBuffer) > s.historyLimit {
+			// 保留最新的 historyLimit 条记录
+			s.historyBuffer = s.historyBuffer[len(s.historyBuffer)-s.historyLimit:]
 		}
 	}
 }
@@ -234,7 +240,6 @@ type MetricsService struct {
 
 	// 配置
 	saveInterval time.Duration
-	historySize  int
 
 	// 依赖
 	storage StorageInterface
@@ -265,10 +270,9 @@ func NewMetricsService(config MetricsConfig) *MetricsService {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ms := &MetricsService{
-		requestStats: NewAtomicRequestStats(),
+		requestStats: NewAtomicRequestStats(config.HistorySize),
 		perfMetrics:  NewPerformanceMetrics(),
 		saveInterval: config.SaveInterval,
-		historySize:  config.HistorySize,
 		storage:      config.Storage,
 		logger:       config.Logger,
 		saveChan:     make(chan bool, 100),

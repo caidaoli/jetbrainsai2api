@@ -78,9 +78,6 @@ const (
 
 	// HistoryFlushInterval 历史记录刷新间隔
 	HistoryFlushInterval = 100 * time.Millisecond
-
-	// QPSCalculationSeconds QPS计算窗口秒数
-	QPSCalculationSeconds = 60.0
 )
 
 // ==================== 账户管理常量 ====================
@@ -455,25 +452,6 @@ const (
 
 	// APIFormatAnthropic Anthropic 格式
 	APIFormatAnthropic = "anthropic"
-)
-
-// ==================== Anthropic SSE 事件常量 ====================
-
-const (
-	// AnthropicEventMessageStart 消息开始事件
-	AnthropicEventMessageStart = "event: message_start\n"
-
-	// AnthropicEventMessageStop 消息结束事件
-	AnthropicEventMessageStop = "event: message_stop\n"
-
-	// AnthropicEventContentBlockStart 内容块开始事件
-	AnthropicEventContentBlockStart = "event: content_block_start\n"
-
-	// AnthropicEventContentBlockDelta 内容块增量事件
-	AnthropicEventContentBlockDelta = "event: content_block_delta\n"
-
-	// AnthropicEventContentBlockStop 内容块结束事件
-	AnthropicEventContentBlockStop = "event: content_block_stop\n"
 )
 
 // ==================== Anthropic 流事件类型常量 ====================

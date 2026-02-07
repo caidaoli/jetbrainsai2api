@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 )
 
@@ -162,14 +161,9 @@ func GetModelsConfig(path string) (ModelsData, ModelsConfig, error) {
 		return modelsData, ModelsConfig{}, fmt.Errorf("failed to load models: %w", err)
 	}
 
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path 来自配置常量，非用户输入
+	modelsConfig, err := loadModelsConfig(path)
 	if err != nil {
-		return modelsData, ModelsConfig{}, err
-	}
-
-	var modelsConfig ModelsConfig
-	if err := sonic.Unmarshal(data, &modelsConfig); err != nil {
-		return modelsData, ModelsConfig{}, err
+		return modelsData, ModelsConfig{}, fmt.Errorf("failed to load model mappings: %w", err)
 	}
 
 	return modelsData, modelsConfig, nil

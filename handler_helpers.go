@@ -100,9 +100,7 @@ func withPanicRecoveryWithMetrics(
 	c *gin.Context,
 	metrics *MetricsService,
 	startTime time.Time,
-	account **JetbrainsAccount,
 	resp **http.Response,
-	accountManager AccountManager,
 	errorFormat string,
 ) func() {
 	return func() {
@@ -112,9 +110,6 @@ func withPanicRecoveryWithMetrics(
 			// 确保资源释放
 			if resp != nil && *resp != nil && (*resp).Body != nil {
 				_ = (*resp).Body.Close()
-			}
-			if account != nil && *account != nil && accountManager != nil {
-				accountManager.ReleaseAccount(*account)
 			}
 
 			recordFailureWithMetrics(metrics, startTime, "", "")

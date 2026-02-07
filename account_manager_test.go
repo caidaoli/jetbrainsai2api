@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -305,5 +306,93 @@ func TestPooledAccountManager_GetAllAccounts(t *testing.T) {
 	originalAccounts := am.GetAllAccounts()
 	if originalAccounts[0].JWT == "modified" {
 		t.Error("GetAllAccounts should return a copy, not the original slice")
+	}
+}
+
+// TestPooledAccountManager_GetAllAccounts_ConcurrentSnapshot 验证并发快照读取无数据竞争
+func TestPooledAccountManager_GetAllAccounts_ConcurrentSnapshot(t *testing.T) {
+	now := time.Now()
+	accounts := []JetbrainsAccount{
+		{JWT: "test-jwt-1", HasQuota: true, ExpiryTime: now.Add(24 * time.Hour), LastQuotaCheck: float64(now.Unix()), LicenseID: "test-1"},
+	}
+
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create account manager: %v", err)
+	}
+	defer func() { _ = am.Close() }()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			setAccountQuotaStatus(&am.accounts[0], i%2 == 0, time.Now())
+			am.accounts[0].mu.Lock()
+			am.accounts[0].JWT = "test-jwt-updated"
+			am.accounts[0].mu.Unlock()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			snapshot := am.GetAllAccounts()
+			if len(snapshot) != 1 {
+				select {
+				case errCh <- fmt.Errorf("expected 1 account, got %d", len(snapshot)):
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestPooledAccountManager_CheckQuotaErrorShouldNotMutateState 验证配额检查失败不会污染账户状态
+func TestPooledAccountManager_CheckQuotaErrorShouldNotMutateState(t *testing.T) {
+	accounts := []JetbrainsAccount{
+		{
+			LicenseID:      "", // 无法刷新 JWT，触发 getQuotaData 错误
+			Authorization:  "",
+			JWT:            "",
+			HasQuota:       true,
+			LastQuotaCheck: 0,
+		},
+	}
+
+	am, err := NewPooledAccountManager(AccountManagerConfig{
+		Accounts:   accounts,
+		HTTPClient: &http.Client{},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create account manager: %v", err)
+	}
+	defer func() { _ = am.Close() }()
+
+	err = am.CheckQuota(&am.accounts[0])
+	if err == nil {
+		t.Fatal("期望配额检查失败，但返回 nil")
+	}
+
+	if !am.accounts[0].HasQuota {
+		t.Fatalf("配额检查失败不应把账户标记为无配额")
+	}
+	if am.accounts[0].LastQuotaCheck != 0 {
+		t.Fatalf("配额检查失败不应更新时间戳，实际: %v", am.accounts[0].LastQuotaCheck)
 	}
 }

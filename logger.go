@@ -162,11 +162,15 @@ func createLogger() Logger {
 	output, fileHandle := createDebugFileOutput()
 
 	// 直接使用已打开的输出，避免重复打开文件
-	return &AppLogger{
+	logger := &AppLogger{
 		logger:     log.New(output, "", log.LstdFlags),
 		debug:      debugMode,
 		fileHandle: fileHandle, // 可能为nil（stdout时）
 	}
+
+	// 保持全局便捷日志与主日志实例一致，避免 debug 模式不一致
+	defaultLogger = logger
+	return logger
 }
 
 // ==================== 全局日志实例 ====================

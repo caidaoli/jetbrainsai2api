@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -51,27 +52,19 @@ func DefaultHTTPClientSettings() HTTPClientSettings {
 func loadModels(path string) (ModelsData, error) {
 	var result ModelsData
 
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path 来自配置文件，非用户输入
+	config, err := loadModelsConfig(path)
 	if err != nil {
-		return result, fmt.Errorf("failed to read %s: %w", path, err)
-	}
-
-	var config ModelsConfig
-	if err := sonic.Unmarshal(data, &config); err != nil {
-		// Try old format (string array)
-		var modelIDs []string
-		if err := sonic.Unmarshal(data, &modelIDs); err != nil {
-			return result, fmt.Errorf("failed to parse %s: %w", path, err)
-		}
-		// Convert to new format
-		config.Models = make(map[string]string)
-		for _, modelID := range modelIDs {
-			config.Models[modelID] = modelID
-		}
+		return result, err
 	}
 
 	now := time.Now().Unix()
+	modelKeys := make([]string, 0, len(config.Models))
 	for modelKey := range config.Models {
+		modelKeys = append(modelKeys, modelKey)
+	}
+	sort.Strings(modelKeys)
+
+	for _, modelKey := range modelKeys {
 		result.Data = append(result.Data, ModelInfo{
 			ID:      modelKey,
 			Object:  ModelObjectType,
@@ -82,6 +75,35 @@ func loadModels(path string) (ModelsData, error) {
 
 	Info("Loaded %d models from %s", len(config.Models), path)
 	return result, nil
+}
+
+// loadModelsConfig 加载模型配置映射（兼容 map 与旧数组格式）
+func loadModelsConfig(path string) (ModelsConfig, error) {
+	var config ModelsConfig
+
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path 来自配置文件，非用户输入
+	if err != nil {
+		return config, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+
+	if err := sonic.Unmarshal(data, &config); err != nil {
+		// Try old format (string array)
+		var modelIDs []string
+		if err := sonic.Unmarshal(data, &modelIDs); err != nil {
+			return config, fmt.Errorf("failed to parse %s: %w", path, err)
+		}
+		// Convert to new format
+		config.Models = make(map[string]string)
+		for _, modelID := range modelIDs {
+			config.Models[modelID] = modelID
+		}
+	}
+
+	if config.Models == nil {
+		config.Models = make(map[string]string)
+	}
+
+	return config, nil
 }
 
 // ==================== 辅助函数 ====================

@@ -102,6 +102,7 @@ JETBRAINS_AUTHORIZATIONS=your-auth-token-1,your-auth-token-2
 # 可选配置
 PORT=7860                    # 服务端口
 GIN_MODE=release            # 运行模式 (debug/release)
+STATS_AUTH_ENABLED=true     # 统计页面/API是否需要鉴权
 REDIS_URL=redis://localhost:6379  # Redis缓存（可选）
 ```
 

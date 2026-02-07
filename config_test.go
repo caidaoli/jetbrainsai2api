@@ -263,6 +263,49 @@ func TestLoadModels_FileNotFound(t *testing.T) {
 	}
 }
 
+// TestDefaultModelsConfigContainsGPT4ORegression 防止默认配置丢失 gpt-4o 映射
+func TestDefaultModelsConfigContainsGPT4ORegression(t *testing.T) {
+	modelsData, modelsConfig, err := GetModelsConfig(DefaultModelsConfigPath)
+	if err != nil {
+		t.Fatalf("加载默认模型配置失败: %v", err)
+	}
+
+	if mapped := getInternalModelName(modelsConfig, "gpt-4o"); mapped != "openai-gpt-4o" {
+		t.Fatalf("gpt-4o 映射错误，期望 'openai-gpt-4o'，实际 '%s'", mapped)
+	}
+
+	if model := getModelItem(modelsData, "gpt-4o"); model == nil {
+		t.Fatalf("/v1/models 语义回归：默认模型列表缺少 gpt-4o")
+	}
+}
+
+// TestGetModelsConfig_OldFormatCompatibility 确保旧数组格式与新格式均可用于完整配置加载
+func TestGetModelsConfig_OldFormatCompatibility(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "models_old_format_*.json")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	if _, err := tmpFile.WriteString(`["gpt-4o","gpt-4.1"]`); err != nil {
+		t.Fatalf("写入临时文件失败: %v", err)
+	}
+	_ = tmpFile.Close()
+
+	modelsData, modelsConfig, err := GetModelsConfig(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("GetModelsConfig 应兼容旧格式，实际报错: %v", err)
+	}
+
+	if len(modelsData.Data) != 2 {
+		t.Fatalf("期望加载 2 个模型，实际 %d", len(modelsData.Data))
+	}
+
+	if mapped := getInternalModelName(modelsConfig, "gpt-4o"); mapped != "gpt-4o" {
+		t.Fatalf("旧格式映射应回退为同名，实际 '%s'", mapped)
+	}
+}
+
 // TestGetModelItem 测试从模型数据中查找模型
 func TestGetModelItem(t *testing.T) {
 	modelsData := ModelsData{
@@ -391,4 +434,40 @@ func TestGetModelItem(t *testing.T) {
 // 辅助函数：字符串包含检查
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+// TestLoadModels_ShouldReturnStableSortedOrder 确保模型列表顺序稳定，避免 map 迭代随机性
+func TestLoadModels_ShouldReturnStableSortedOrder(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "models_sorted_order_*.json")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	content := `{
+		"models": {
+			"z-model": "internal-z",
+			"a-model": "internal-a",
+			"m-model": "internal-m"
+		}
+	}`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("写入临时文件失败: %v", err)
+	}
+	_ = tmpFile.Close()
+
+	result, err := loadModels(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("loadModels 失败: %v", err)
+	}
+	if len(result.Data) != 3 {
+		t.Fatalf("期望 3 个模型，实际 %d", len(result.Data))
+	}
+
+	expected := []string{"a-model", "m-model", "z-model"}
+	for i, modelID := range expected {
+		if result.Data[i].ID != modelID {
+			t.Fatalf("模型顺序错误: index=%d 期望=%s 实际=%s", i, modelID, result.Data[i].ID)
+		}
+	}
 }

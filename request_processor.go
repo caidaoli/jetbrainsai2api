@@ -237,8 +237,7 @@ func (p *RequestProcessor) SendUpstreamRequest(
 	// 检查配额状态
 	if resp.StatusCode == JetBrainsStatusQuotaExhausted {
 		p.logger.Warn("Account %s has no quota (received 477)", getTokenDisplayName(account))
-		account.HasQuota = false
-		account.LastQuotaCheck = float64(time.Now().Unix())
+		markAccountNoQuota(account)
 	}
 
 	return resp, nil

@@ -12,37 +12,176 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type anthropicStreamingToolState struct {
+	id      string
+	name    string
+	rawArgs strings.Builder
+
+	started bool
+	stopped bool
+
+	index int
+}
+
+func (s *anthropicStreamingToolState) reset(id, name string, index int) {
+	s.id = id
+	s.name = name
+	s.index = index
+	s.rawArgs.Reset()
+	s.started = false
+	s.stopped = false
+}
+
+func (s *anthropicStreamingToolState) appendArgs(delta string) {
+	if delta == "" {
+		return
+	}
+	s.rawArgs.WriteString(delta)
+}
+
+func (s *anthropicStreamingToolState) parsedInput() map[string]any {
+	args := strings.TrimSpace(s.rawArgs.String())
+	if args == "" {
+		return map[string]any{}
+	}
+
+	var parsed map[string]any
+	if err := sonic.Unmarshal([]byte(args), &parsed); err != nil {
+		return map[string]any{"arguments": args}
+	}
+	return parsed
+}
+
+func writeAnthropicSSEEvent(c *gin.Context, eventName string, payload []byte) error {
+	if _, err := c.Writer.Write([]byte("event: " + eventName + "\n")); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(c.Writer, "%s%s\n\n", StreamChunkPrefix, string(payload)); err != nil {
+		return err
+	}
+	c.Writer.Flush()
+	return nil
+}
+
 // handleAnthropicStreamingResponseWithMetrics 处理流式响应 (Anthropic 格式，带注入的 MetricsService)
 func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, metrics *MetricsService) {
 	defer func() { _ = resp.Body.Close() }()
 
-	// 设置 Anthropic 流式响应头
 	setStreamingHeaders(c, APIFormatAnthropic)
 
-	// 发送 message_start 事件
 	messageStartData := generateAnthropicStreamResponse(StreamEventTypeMessageStart, "", 0)
-	_, _ = c.Writer.Write([]byte(AnthropicEventMessageStart))
-	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(messageStartData))
-	c.Writer.Flush()
-
-	// 发送 content_block_start 事件
-	contentBlockStartData := generateAnthropicStreamResponse(StreamEventTypeContentBlockStart, "", 0)
-	_, _ = c.Writer.Write([]byte(AnthropicEventContentBlockStart))
-	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(contentBlockStartData))
-	c.Writer.Flush()
+	if err := writeAnthropicSSEEvent(c, StreamEventTypeMessageStart, messageStartData); err != nil {
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
+		Debug("Failed to write message_start: %v", err)
+		return
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	// 增大缓冲区以处理大型工具调用参数（默认64KB不足）
 	scanner.Buffer(make([]byte, MaxScannerBufferSize), MaxScannerBufferSize)
+
 	var fullContent strings.Builder
 	var hasContent bool
 	lineCount := 0
+	textBlockOpen := false
+	textBlockIndex := -1
+	nextContentBlockIndex := 0
+	toolState := &anthropicStreamingToolState{}
+
+	startTextBlock := func() error {
+		if textBlockOpen {
+			return nil
+		}
+		textBlockIndex = nextContentBlockIndex
+		nextContentBlockIndex++
+		payload := generateAnthropicStreamResponse(StreamEventTypeContentBlockStart, "", textBlockIndex)
+		if err := writeAnthropicSSEEvent(c, StreamEventTypeContentBlockStart, payload); err != nil {
+			return err
+		}
+		textBlockOpen = true
+		return nil
+	}
+
+	closeTextBlock := func() error {
+		if !textBlockOpen {
+			return nil
+		}
+		payload := generateAnthropicStreamResponse(StreamEventTypeContentBlockStop, "", textBlockIndex)
+		if err := writeAnthropicSSEEvent(c, StreamEventTypeContentBlockStop, payload); err != nil {
+			return err
+		}
+		textBlockOpen = false
+		return nil
+	}
+
+	startToolBlock := func() error {
+		if toolState.started || toolState.id == "" || toolState.name == "" {
+			return nil
+		}
+
+		startPayload := AnthropicStreamResponse{
+			Type:  StreamEventTypeContentBlockStart,
+			Index: &toolState.index,
+			ContentBlock: &AnthropicContentBlock{
+				Type:  ContentBlockTypeToolUse,
+				ID:    toolState.id,
+				Name:  toolState.name,
+				Input: toolState.parsedInput(),
+			},
+		}
+
+		data, err := marshalJSON(startPayload)
+		if err != nil {
+			return err
+		}
+
+		if err := writeAnthropicSSEEvent(c, StreamEventTypeContentBlockStart, data); err != nil {
+			return err
+		}
+
+		toolState.started = true
+		return nil
+	}
+
+	stopToolBlock := func() error {
+		if !toolState.started || toolState.stopped {
+			return nil
+		}
+
+		stopPayload := AnthropicStreamResponse{
+			Type:  StreamEventTypeContentBlockStop,
+			Index: &toolState.index,
+		}
+		data, err := marshalJSON(stopPayload)
+		if err != nil {
+			return err
+		}
+		if err := writeAnthropicSSEEvent(c, StreamEventTypeContentBlockStop, data); err != nil {
+			return err
+		}
+		toolState.stopped = true
+		return nil
+	}
+
+	flushCurrentTool := func() error {
+		if toolState.id == "" {
+			return nil
+		}
+		if err := closeTextBlock(); err != nil {
+			return err
+		}
+		if err := startToolBlock(); err != nil {
+			return err
+		}
+		if err := stopToolBlock(); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	Debug("=== JetBrains Streaming Response Debug ===")
 
 	ctx := c.Request.Context()
 	for scanner.Scan() {
-		// 检查 context 是否已取消（客户端断开连接）
 		select {
 		case <-ctx.Done():
 			Debug("Client disconnected during streaming, stopping")
@@ -50,77 +189,80 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 		default:
 		}
 
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
 		lineCount++
-
-		// 记录每一行原始数据
 		Debug("Line %d: '%s'", lineCount, line)
 
-		line = strings.TrimSpace(line)
-
-		if line == "" {
-			Debug("Line %d: Empty line, skipping", lineCount)
+		if line == "" || !strings.HasPrefix(line, StreamChunkPrefix) {
 			continue
 		}
 
-		// 处理 SSE 格式 (KISS: 简单的行解析)
-		if strings.HasPrefix(line, StreamChunkPrefix) {
-			data := strings.TrimPrefix(line, StreamChunkPrefix)
-			Debug("Line %d: SSE data = '%s'", lineCount, data)
+		data := strings.TrimSpace(strings.TrimPrefix(line, StreamChunkPrefix))
+		Debug("Line %d: SSE data = '%s'", lineCount, data)
 
-			if data == StreamChunkDoneMessage {
-				Debug("Line %d: Found [DONE], breaking", lineCount)
-				break
-			}
-			if data == StreamEndMarker {
-				Debug("Line %d: Found 'end', breaking", lineCount)
-				break
+		if data == "" || data == StreamNullValue {
+			continue
+		}
+		if data == StreamChunkDoneMessage || data == StreamEndMarker {
+			break
+		}
+
+		var streamData map[string]any
+		if err := sonic.Unmarshal([]byte(data), &streamData); err != nil {
+			Debug("Line %d: Failed to parse stream data: %v", lineCount, err)
+			continue
+		}
+
+		eventType, _ := streamData["type"].(string)
+		switch eventType {
+		case JetBrainsEventTypeContent:
+			if toolState.id != "" && !toolState.stopped {
+				if err := flushCurrentTool(); err != nil {
+					Debug("Line %d: Failed to flush pending tool before text: %v", lineCount, err)
+					return
+				}
 			}
 
-			// 解析 JetBrains 流式数据
-			content, err := parseJetbrainsStreamData(data)
-			if err != nil {
-				Debug("Line %d: Failed to parse stream data: %v", lineCount, err)
+			content, _ := streamData["content"].(string)
+			if content == "" {
 				continue
 			}
-
-			Debug("Line %d: Parsed content = '%s'", lineCount, content)
-
-			if content != "" {
-				hasContent = true
-				fullContent.WriteString(content)
-
-				// 发送 content_block_delta 事件 (Anthropic 格式)
-				contentBlockDeltaData := generateAnthropicStreamResponse(StreamEventTypeContentBlockDelta, content, 0)
-
-				bytesWritten, err := c.Writer.Write([]byte(AnthropicEventContentBlockDelta))
-				if err != nil {
-					Debug("Line %d: Failed to write event header: %v", lineCount, err)
-					return
-				}
-				Debug("Line %d: Wrote event header, %d bytes", lineCount, bytesWritten)
-
-				dataLine := fmt.Sprintf("%s%s\n\n", StreamChunkPrefix, string(contentBlockDeltaData))
-				bytesWritten, err = c.Writer.Write([]byte(dataLine))
-				if err != nil {
-					Debug("Line %d: Failed to write data: %v", lineCount, err)
-					return
-				}
-				Debug("Line %d: Wrote data, %d bytes, content: '%s'", lineCount, bytesWritten, content)
-
-				if flusher, ok := c.Writer.(http.Flusher); ok {
-					flusher.Flush()
-					Debug("Line %d: Flushed data to client", lineCount)
-				} else {
-					Debug("Line %d: Warning: Writer does not support flushing", lineCount)
-				}
+			if err := startTextBlock(); err != nil {
+				Debug("Line %d: Failed to start text block: %v", lineCount, err)
+				return
 			}
-		} else {
-			Debug("Line %d: Not SSE data format, raw line: '%s'", lineCount, line)
+
+			hasContent = true
+			fullContent.WriteString(content)
+
+			contentBlockDeltaData := generateAnthropicStreamResponse(StreamEventTypeContentBlockDelta, content, textBlockIndex)
+			if err := writeAnthropicSSEEvent(c, StreamEventTypeContentBlockDelta, contentBlockDeltaData); err != nil {
+				Debug("Line %d: Failed to write content delta: %v", lineCount, err)
+				return
+			}
+
+		case JetBrainsEventTypeToolCall:
+			if upstreamID, ok := streamData["id"].(string); ok && upstreamID != "" {
+				if toolName, ok := streamData["name"].(string); ok && toolName != "" {
+					if err := flushCurrentTool(); err != nil {
+						Debug("Line %d: Failed to flush previous tool block: %v", lineCount, err)
+						return
+					}
+					toolState.reset(upstreamID, toolName, nextContentBlockIndex)
+					nextContentBlockIndex++
+				}
+			} else if contentPart, ok := streamData["content"].(string); ok {
+				toolState.appendArgs(contentPart)
+			}
+
+		case JetBrainsEventTypeFinishMetadata:
+			if err := flushCurrentTool(); err != nil {
+				Debug("Line %d: Failed to flush tool block at finish: %v", lineCount, err)
+				return
+			}
 		}
 	}
 
-	// 检查 scanner 是否遇到错误
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() != nil {
 			Debug("Client disconnected during streaming: %v", err)
@@ -129,25 +271,32 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 		}
 	}
 
+	if err := flushCurrentTool(); err != nil {
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
+		Debug("Failed to flush trailing tool block: %v", err)
+		return
+	}
+
 	Debug("=== Streaming Response Summary ===")
 	Debug("Total lines processed: %d", lineCount)
 	Debug("Has content: %v", hasContent)
 	Debug("Full aggregated content: '%s'", fullContent.String())
 	Debug("===================================")
 
-	// 发送 content_block_stop 事件
-	contentBlockStopData := generateAnthropicStreamResponse(StreamEventTypeContentBlockStop, "", 0)
-	_, _ = c.Writer.Write([]byte(AnthropicEventContentBlockStop))
-	_, _ = fmt.Fprintf(c.Writer, "%s%s\n\n", StreamChunkPrefix, string(contentBlockStopData))
-	c.Writer.Flush()
+	if err := closeTextBlock(); err != nil {
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
+		Debug("Failed to write content_block_stop: %v", err)
+		return
+	}
 
-	// 发送 message_stop 事件
 	messageStopData := generateAnthropicStreamResponse(StreamEventTypeMessageStop, "", 0)
-	_, _ = c.Writer.Write([]byte(AnthropicEventMessageStop))
-	_, _ = fmt.Fprintf(c.Writer, "%s%s\n\n", StreamChunkPrefix, string(messageStopData))
-	c.Writer.Flush()
+	if err := writeAnthropicSSEEvent(c, StreamEventTypeMessageStop, messageStopData); err != nil {
+		recordFailureWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
+		Debug("Failed to write message_stop: %v", err)
+		return
+	}
 
-	if hasContent {
+	if hasContent || toolState.started {
 		recordSuccessWithMetrics(metrics, startTime, anthReq.Model, accountIdentifier)
 		Debug("Anthropic streaming response completed successfully")
 	} else {

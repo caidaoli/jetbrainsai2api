@@ -153,8 +153,13 @@ func (am *PooledAccountManager) ensureAccountReady(
 	totalAccounts int,
 ) error {
 	// 检查并刷新 JWT（如果需要）
-	if account.LicenseID != "" {
-		if account.JWT == "" || time.Now().After(account.ExpiryTime.Add(-JWTRefreshTime)) {
+	account.mu.Lock()
+	jwt := account.JWT
+	expiryTime := account.ExpiryTime
+	licenseID := account.LicenseID
+	account.mu.Unlock()
+	if licenseID != "" {
+		if jwt == "" || time.Now().After(expiryTime.Add(-JWTRefreshTime)) {
 			if err := am.RefreshJWT(account); err != nil {
 				am.logger.Error("Failed to refresh JWT for %s (tried %d/%d accounts): %v",
 					getTokenDisplayName(account), len(triedAccounts), totalAccounts, err)
@@ -172,7 +177,10 @@ func (am *PooledAccountManager) ensureAccountReady(
 		return err
 	}
 
-	if !account.HasQuota {
+	account.mu.Lock()
+	hasQuota := account.HasQuota
+	account.mu.Unlock()
+	if !hasQuota {
 		am.logger.Warn("Account %s is over quota (tried %d/%d accounts)",
 			getTokenDisplayName(account), len(triedAccounts), totalAccounts)
 		return fmt.Errorf("account over quota")
@@ -228,14 +236,15 @@ func (am *PooledAccountManager) CheckQuota(account *JetbrainsAccount) error {
 	return am.checkQuotaInternal(account)
 }
 
-// checkQuotaInternal 内部配额检查实现（使用账户级锁保护状态修改）
+// checkQuotaInternal 内部配额检查实现（仅在读快照和写状态时加锁，避免长时间持锁）
 func (am *PooledAccountManager) checkQuotaInternal(account *JetbrainsAccount) error {
 	account.mu.Lock()
-	defer account.mu.Unlock()
+	lastQuotaCheck := account.LastQuotaCheck
+	account.mu.Unlock()
 
 	// 如果最近检查过配额（1小时内），跳过检查
-	if account.LastQuotaCheck > 0 {
-		lastCheck := time.Unix(int64(account.LastQuotaCheck), 0)
+	if lastQuotaCheck > 0 {
+		lastCheck := time.Unix(int64(lastQuotaCheck), 0)
 		if time.Since(lastCheck) < QuotaCacheTime {
 			// 配额检查仍然有效，跳过
 			return nil
@@ -243,13 +252,10 @@ func (am *PooledAccountManager) checkQuotaInternal(account *JetbrainsAccount) er
 	}
 
 	// 使用注入的 cache 获取配额数据
-	quotaData, err := getQuotaData(account, am.httpClient, am.cache)
-	if err != nil {
-		account.HasQuota = false
+	if _, err := getQuotaData(account, am.httpClient, am.cache); err != nil {
 		return err
 	}
 
-	processQuotaData(quotaData, account)
 	return nil
 }
 
@@ -262,16 +268,19 @@ func (am *PooledAccountManager) GetAllAccounts() []JetbrainsAccount {
 	// 手动复制账户信息，跳过 mutex 字段（使用索引避免复制）
 	accounts := make([]JetbrainsAccount, len(am.accounts))
 	for i := range am.accounts {
+		account := &am.accounts[i]
+		account.mu.Lock()
 		accounts[i] = JetbrainsAccount{
-			LicenseID:      am.accounts[i].LicenseID,
-			Authorization:  am.accounts[i].Authorization,
-			JWT:            am.accounts[i].JWT,
-			LastUpdated:    am.accounts[i].LastUpdated,
-			HasQuota:       am.accounts[i].HasQuota,
-			LastQuotaCheck: am.accounts[i].LastQuotaCheck,
-			ExpiryTime:     am.accounts[i].ExpiryTime,
+			LicenseID:      account.LicenseID,
+			Authorization:  account.Authorization,
+			JWT:            account.JWT,
+			LastUpdated:    account.LastUpdated,
+			HasQuota:       account.HasQuota,
+			LastQuotaCheck: account.LastQuotaCheck,
+			ExpiryTime:     account.ExpiryTime,
 			// mu 字段不复制，使用零值
 		}
+		account.mu.Unlock()
 	}
 	return accounts
 }

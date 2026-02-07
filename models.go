@@ -324,9 +324,10 @@ type AnthropicMessagesResponse struct {
 
 // 流式响应结构
 type AnthropicStreamResponse struct {
-	Type  string `json:"type"`
-	Index *int   `json:"index,omitempty"`
-	Delta *struct {
+	Type         string                 `json:"type"`
+	Index        *int                   `json:"index,omitempty"`
+	ContentBlock *AnthropicContentBlock `json:"content_block,omitempty"`
+	Delta        *struct {
 		Type string `json:"type,omitempty"`
 		Text string `json:"text,omitempty"`
 	} `json:"delta,omitempty"`

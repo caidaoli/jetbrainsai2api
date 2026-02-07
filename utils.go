@@ -33,6 +33,27 @@ func getEnvWithDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// getEnvBoolWithDefault 获取布尔环境变量，支持标准布尔格式并带默认值回退
+func getEnvBoolWithDefault(key string, defaultValue bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return defaultValue
+	}
+
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.ParseBool(trimmed)
+	if err != nil {
+		Warn("Invalid boolean value for %s: %s, using default %t", key, value, defaultValue)
+		return defaultValue
+	}
+
+	return parsed
+}
+
 // parseEnvList 解析逗号分隔的环境变量为去空格的切片
 func parseEnvList(envVar string) []string {
 	if envVar == "" {
@@ -150,19 +171,36 @@ func generateRandomID(prefix string) string {
 
 // getTokenDisplayName 获取账户的显示名称（用于日志）
 func getTokenDisplayName(account *JetbrainsAccount) string {
-	if account.JWT != "" {
-		return truncateString(account.JWT, 0, 6, "Token ...")
+	if account == nil {
+		return "Token Unknown"
 	}
-	if account.LicenseID != "" {
-		return truncateString(account.LicenseID, 0, 6, "Token ...")
+
+	account.mu.Lock()
+	jwt := account.JWT
+	licenseID := account.LicenseID
+	account.mu.Unlock()
+
+	if jwt != "" {
+		return truncateString(jwt, 0, 6, "Token ...")
+	}
+	if licenseID != "" {
+		return truncateString(licenseID, 0, 6, "Token ...")
 	}
 	return "Token Unknown"
 }
 
 // getLicenseDisplayName 获取许可证的显示名称（用于统计页面）
 func getLicenseDisplayName(account *JetbrainsAccount) string {
-	if account.Authorization != "" {
-		return truncateString(account.Authorization, 3, 3, "*")
+	if account == nil {
+		return "Unknown"
+	}
+
+	account.mu.Lock()
+	authorization := account.Authorization
+	account.mu.Unlock()
+
+	if authorization != "" {
+		return truncateString(authorization, 3, 3, "*")
 	}
 	return "Unknown"
 }
@@ -185,10 +223,15 @@ func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client,
 		usageRate = (dailyUsed / dailyTotal) * 100
 	}
 
+	account.mu.Lock()
+	hasQuota := account.HasQuota
+	expiryTime := account.ExpiryTime
+	account.mu.Unlock()
+
 	status := AccountStatusNormal
-	if !account.HasQuota {
+	if !hasQuota {
 		status = AccountStatusNoQuota
-	} else if time.Now().Add(AccountExpiryWarningTime).After(account.ExpiryTime) {
+	} else if time.Now().Add(AccountExpiryWarningTime).After(expiryTime) {
 		status = AccountStatusExpiring
 	}
 
@@ -198,8 +241,8 @@ func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client,
 		Used:       dailyUsed,
 		Total:      dailyTotal,
 		UsageRate:  usageRate,
-		ExpiryDate: account.ExpiryTime,
+		ExpiryDate: expiryTime,
 		Status:     status,
-		HasQuota:   account.HasQuota,
+		HasQuota:   hasQuota,
 	}, nil
 }

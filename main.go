@@ -77,6 +77,7 @@ func loadServerConfigFromEnv() (ServerConfig, error) {
 		JetbrainsAccounts:  jetbrainsAccounts,
 		ModelsConfigPath:   DefaultModelsConfigPath,
 		HTTPClientSettings: DefaultHTTPClientSettings(),
+		StatsAuthEnabled:   getEnvBoolWithDefault("STATS_AUTH_ENABLED", true),
 	}
 
 	return config, nil

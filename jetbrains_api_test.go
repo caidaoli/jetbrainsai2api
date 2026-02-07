@@ -571,3 +571,31 @@ func TestProcessQuotaData_ConcurrentAccess(t *testing.T) {
 		t.Errorf("并发调用后 LastQuotaCheck 应该被更新")
 	}
 }
+
+// TestMarkAccountNoQuota_ConcurrentAccess 验证并发标记配额不足不会触发数据竞争
+func TestMarkAccountNoQuota_ConcurrentAccess(t *testing.T) {
+	account := &JetbrainsAccount{
+		LicenseID: "concurrent-noquota-test",
+		HasQuota:  true,
+	}
+
+	done := make(chan bool)
+	for i := 0; i < 20; i++ {
+		go func() {
+			markAccountNoQuota(account)
+			done <- true
+		}()
+	}
+
+	for i := 0; i < 20; i++ {
+		<-done
+	}
+
+	if account.HasQuota {
+		t.Errorf("并发标记后 HasQuota 应该为 false")
+	}
+
+	if account.LastQuotaCheck == 0 {
+		t.Errorf("并发标记后 LastQuotaCheck 应该被更新")
+	}
+}

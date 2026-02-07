@@ -43,13 +43,19 @@ func processJetbrainsStream(ctx context.Context, resp *http.Response, logger Log
 		default:
 		}
 
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, StreamChunkPrefix) || line == StreamEndLine {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, StreamChunkPrefix) {
 			continue
 		}
 
-		dataStr := line[6:]
+		dataStr := strings.TrimSpace(strings.TrimPrefix(line, StreamChunkPrefix))
+		if dataStr == StreamEndMarker || dataStr == StreamChunkDoneMessage {
+			break
+		}
+		if dataStr == StreamNullValue || dataStr == "" {
+			continue
+		}
+
 		var data map[string]any
 		if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
 			logger.Error("Error unmarshalling stream event: %v", err)
@@ -77,6 +83,26 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	created := time.Now().Unix() // 预计算时间戳，避免每个 chunk 都调用 time.Now()
 	firstChunkSent := false
 	var currentTool *map[string]any
+	var toolCalls []map[string]any
+	streamFinished := false
+
+	finalizeCurrentTool := func() {
+		if currentTool == nil {
+			return
+		}
+
+		if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
+			if args, ok := funcMap["arguments"].(string); ok && args != "" {
+				var argsTest map[string]any
+				if err := sonic.Unmarshal([]byte(args), &argsTest); err != nil {
+					logger.Warn("Tool call arguments are not valid JSON: %v", err)
+				}
+			}
+		}
+
+		toolCalls = append(toolCalls, *currentTool)
+		currentTool = nil
+	}
 
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
@@ -122,10 +148,12 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 		case JetBrainsEventTypeToolCall:
 			// 处理新的ToolCall格式 - 使用上游提供的ID
 			if upstreamID, ok := data["id"].(string); ok && upstreamID != "" {
-				// 开始新的工具调用 - 使用上游提供的ID
+				// 开始新的工具调用前先收敛前一个，避免多工具调用丢失
+				finalizeCurrentTool()
+
 				if name, ok := data["name"].(string); ok && name != "" {
 					currentTool = &map[string]any{
-						"index": 0,
+						"index": len(toolCalls),
 						"id":    upstreamID, // 使用上游提供的ID
 						"function": map[string]any{
 							"arguments": "",
@@ -156,8 +184,11 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			}
 
 			if funcName != "" {
+				// 旧格式 FunctionCall 也可能出现多个，保持与 ToolCall 一致的收敛逻辑
+				finalizeCurrentTool()
+
 				currentTool = &map[string]any{
-					"index": 0,
+					"index": len(toolCalls),
 					"id":    generateRandomID(ToolCallIDPrefix),
 					"function": map[string]any{
 						"arguments": "",
@@ -172,29 +203,25 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				}
 			}
 		case JetBrainsEventTypeFinishMetadata:
+			// 收敛最后一个工具调用
+			finalizeCurrentTool()
+
 			// 解析上游 finish_reason
 			finishReason := FinishReasonStop
 			if reason, ok := data["reason"].(string); ok && reason != "" {
 				finishReason = mapJetbrainsToOpenAIFinishReason(reason)
-			} else if currentTool != nil {
+			} else if len(toolCalls) > 0 {
 				// 兼容: 如果有工具调用但没有 reason 字段，默认为 tool_calls
 				finishReason = FinishReasonToolCalls
 			}
 
-			if currentTool != nil {
-				// Validate the tool call arguments before sending
-				if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
-					if args, ok := funcMap["arguments"].(string); ok && args != "" {
-						// Try to validate JSON format
-						var argsTest map[string]any
-						if err := sonic.Unmarshal([]byte(args), &argsTest); err != nil {
-							logger.Warn("Tool call arguments are not valid JSON: %v", err)
-						}
-					}
-				}
-
+			if len(toolCalls) > 0 {
 				deltaPayload := map[string]any{
-					"tool_calls": []map[string]any{*currentTool},
+					"tool_calls": toolCalls,
+				}
+				if !firstChunkSent {
+					deltaPayload["role"] = RoleAssistant
+					firstChunkSent = true
 				}
 				streamResp := StreamResponse{
 					ID:      streamID,
@@ -223,11 +250,12 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			respJSON, err := marshalJSON(finalResp)
 			if err != nil {
 				logger.Warn("Failed to marshal final response: %v", err)
-				return false
+			} else {
+				_, _ = writeSSEData(c.Writer, respJSON)
 			}
-			_, _ = writeSSEData(c.Writer, respJSON)
 			_, _ = writeSSEDone(c.Writer)
 			c.Writer.Flush()
+			streamFinished = true
 			return false // Stop processing
 		}
 		return true // Continue processing
@@ -244,6 +272,54 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 		}
 	}
 
+	if err == nil && !streamFinished {
+		// 上游缺失 FinishMetadata 时兜底收尾，确保客户端能收到 [DONE]
+		finalizeCurrentTool()
+
+		if len(toolCalls) > 0 {
+			deltaPayload := map[string]any{
+				"tool_calls": toolCalls,
+			}
+			if !firstChunkSent {
+				deltaPayload["role"] = RoleAssistant
+				firstChunkSent = true
+			}
+			streamResp := StreamResponse{
+				ID:      streamID,
+				Object:  ChatCompletionChunkObjectType,
+				Created: time.Now().Unix(),
+				Model:   request.Model,
+				Choices: []StreamChoice{{Delta: deltaPayload}},
+			}
+			respJSON, marshalErr := marshalJSON(streamResp)
+			if marshalErr != nil {
+				logger.Warn("Failed to marshal fallback tool call response: %v", marshalErr)
+			} else {
+				_, _ = writeSSEData(c.Writer, respJSON)
+			}
+		}
+
+		finishReason := FinishReasonStop
+		if len(toolCalls) > 0 {
+			finishReason = FinishReasonToolCalls
+		}
+		finalResp := StreamResponse{
+			ID:      streamID,
+			Object:  ChatCompletionChunkObjectType,
+			Created: time.Now().Unix(),
+			Model:   request.Model,
+			Choices: []StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(finishReason)}},
+		}
+		respJSON, marshalErr := marshalJSON(finalResp)
+		if marshalErr != nil {
+			logger.Warn("Failed to marshal fallback final response: %v", marshalErr)
+		} else {
+			_, _ = writeSSEData(c.Writer, respJSON)
+		}
+		_, _ = writeSSEDone(c.Writer)
+		c.Writer.Flush()
+	}
+
 	metrics.RecordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
 }
 
@@ -254,6 +330,24 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 	var currentFuncName string
 	var currentFuncArgs string
 	var upstreamFinishReason string // 存储上游的 finish reason
+
+	finalizeLegacyFunctionCall := func(reason string) {
+		if currentFuncName == "" {
+			return
+		}
+
+		toolCalls = append(toolCalls, ToolCall{
+			ID:   generateRandomID(ToolCallIDPrefix),
+			Type: ToolTypeFunction,
+			Function: Function{
+				Name:      currentFuncName,
+				Arguments: currentFuncArgs,
+			},
+		})
+		logger.Warn("Used fallback tool ID generation for legacy function call: %s (%s)", currentFuncName, reason)
+		currentFuncName = ""
+		currentFuncArgs = ""
+	}
 
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
@@ -269,29 +363,29 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 		case JetBrainsEventTypeToolCall:
 			// 处理新的ToolCall格式 - 使用上游提供的ID
 			if upstreamID, ok := data["id"].(string); ok && upstreamID != "" {
+				// 如果此前在走旧 FunctionCall 流，先收敛，避免混合事件导致丢失
+				finalizeLegacyFunctionCall("switch_to_tool_call")
+
 				// 开始新的工具调用 - 记录上游ID
 				if name, ok := data["name"].(string); ok && name != "" {
-					currentFuncName = name
-					currentFuncArgs = ""
-					// 存储上游ID供后续使用
-					if len(toolCalls) == 0 {
-						toolCalls = append(toolCalls, ToolCall{
-							ID:   upstreamID, // 使用上游提供的ID
-							Type: ToolTypeFunction,
-							Function: Function{
-								Name:      name,
-								Arguments: "",
-							},
-						})
-					}
+					// 每个上游 tool_call 都应保留，避免多工具调用丢失
+					toolCalls = append(toolCalls, ToolCall{
+						ID:   upstreamID, // 使用上游提供的ID
+						Type: ToolTypeFunction,
+						Function: Function{
+							Name:      name,
+							Arguments: "",
+						},
+					})
 					logger.Debug("Started new tool call with upstream ID: %s, name: %s", upstreamID, name)
 				}
 			} else if content, ok := data["content"].(string); ok {
 				// 累积参数内容 (当ID为null时)
-				currentFuncArgs += content
-				// 更新toolCalls中的参数
+				// 新格式追加到最后一个 tool call，旧格式追加到 legacy 缓冲
 				if len(toolCalls) > 0 {
 					toolCalls[len(toolCalls)-1].Function.Arguments += content
+				} else {
+					currentFuncArgs += content
 				}
 			}
 		case JetBrainsEventTypeFunctionCall:
@@ -306,37 +400,22 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 			}
 
 			if funcName != "" {
+				// 旧格式可能出现多个函数调用，遇到新 name 时先收敛前一个
+				finalizeLegacyFunctionCall("next_function_call")
 				currentFuncName = funcName
 				currentFuncArgs = ""
 			}
-			currentFuncArgs += funcArgs
+			if currentFuncName != "" {
+				currentFuncArgs += funcArgs
+			}
 		case JetBrainsEventTypeFinishMetadata:
 			// 解析上游 finish_reason（与流式处理保持一致）
 			if reason, ok := data["reason"].(string); ok && reason != "" {
 				upstreamFinishReason = reason
 			}
 
-			// 完成工具调用参数收集 - toolCalls已在ToolCall事件中创建
-			if len(toolCalls) > 0 {
-				// 验证最后一个工具调用
-				lastToolCall := &toolCalls[len(toolCalls)-1]
-				if err := validateToolCallResponse(*lastToolCall); err != nil {
-					logger.Warn("Invalid tool call response: %v", err)
-				}
-				logger.Debug("Completed tool call with ID: %s, args: %s", lastToolCall.ID, lastToolCall.Function.Arguments)
-			} else if currentFuncName != "" {
-				// 后备方案：如果没有通过ToolCall事件创建，则创建一个
-				toolCall := ToolCall{
-					ID:   generateRandomID(ToolCallIDPrefix), // 后备方案
-					Type: ToolTypeFunction,
-					Function: Function{
-						Name:      currentFuncName,
-						Arguments: currentFuncArgs,
-					},
-				}
-				toolCalls = append(toolCalls, toolCall)
-				logger.Warn("Used fallback tool ID generation for: %s", currentFuncName)
-			}
+			// 结束时收敛旧格式 function call
+			finalizeLegacyFunctionCall("finish_metadata")
 			return false // Stop processing
 		}
 		return true // Continue processing
@@ -348,6 +427,18 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 			logger.Debug("Client disconnected during non-streaming response: %v", err)
 		} else {
 			logger.Error("Stream processing error in non-streaming handler: %v", err)
+		}
+	}
+
+	// 上游缺失 FinishMetadata 时兜底收敛 legacy function call
+	if currentFuncName != "" {
+		finalizeLegacyFunctionCall("missing_finish_metadata")
+	}
+	if len(toolCalls) > 0 {
+		for i := range toolCalls {
+			if validateErr := validateToolCallResponse(toolCalls[i]); validateErr != nil {
+				logger.Warn("Invalid tool call response: %v", validateErr)
+			}
 		}
 	}
 

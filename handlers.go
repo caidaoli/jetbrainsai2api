@@ -24,7 +24,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	// Panic 恢复机制和性能追踪
 	var account *JetbrainsAccount
 	var resp *http.Response
-	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &account, &resp, s.accountManager, APIFormatOpenAI)()
+	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &resp, APIFormatOpenAI)()
 	defer trackPerformanceWithMetrics(s.metricsService, startTime)()
 
 	var request ChatCompletionRequest

@@ -13,6 +13,23 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// setAccountQuotaStatus 线程安全地更新账户配额状态
+func setAccountQuotaStatus(account *JetbrainsAccount, hasQuota bool, checkedAt time.Time) {
+	if account == nil {
+		return
+	}
+
+	account.mu.Lock()
+	account.HasQuota = hasQuota
+	account.LastQuotaCheck = float64(checkedAt.Unix())
+	account.mu.Unlock()
+}
+
+// markAccountNoQuota 线程安全地将账户标记为无配额
+func markAccountNoQuota(account *JetbrainsAccount) {
+	setAccountQuotaStatus(account, false, time.Now())
+}
+
 // 注意：JWT 刷新不需要全局锁，因为：
 // 1. 正常请求流程中，账户从 channel 获取，保证同一时间只有一个 goroutine 持有
 // 2. 统计页面操作的是账户副本，不影响原始账户
@@ -161,12 +178,12 @@ func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccou
 		dailyTotal = 1 // Avoid division by zero
 	}
 
-	account.HasQuota = dailyUsed < dailyTotal
-	if !account.HasQuota {
+	hasQuota := dailyUsed < dailyTotal
+	setAccountQuotaStatus(account, hasQuota, time.Now())
+
+	if !hasQuota {
 		Warn("Account %s has no quota", getTokenDisplayName(account))
 	}
-
-	account.LastQuotaCheck = float64(time.Now().Unix())
 }
 
 // getQuotaData 获取配额数据（使用 CacheService）
