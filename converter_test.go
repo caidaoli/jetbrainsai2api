@@ -117,6 +117,7 @@ func TestConvertAssistantMessage_MultipleToolCalls(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
+				logger:              &NopLogger{},
 			}
 			msg := ChatMessage{
 				Role:      RoleAssistant,
@@ -154,6 +155,7 @@ func TestConvertAssistantMessage_MultipleToolCalls(t *testing.T) {
 func TestConvertAssistantMessage_NoToolCalls(t *testing.T) {
 	converter := &MessageConverter{
 		toolIDToFuncNameMap: make(map[string]string),
+		logger:              &NopLogger{},
 	}
 	msg := ChatMessage{
 		Role:    RoleAssistant,
@@ -213,6 +215,7 @@ func TestConvertToolMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
+				logger:              &NopLogger{},
 			}
 
 			// 如果有函数名，添加到映射
@@ -285,6 +288,7 @@ func TestConvertDefaultMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
+				logger:              &NopLogger{},
 			}
 
 			msg := ChatMessage{
@@ -316,6 +320,7 @@ func TestConvertDefaultMessage(t *testing.T) {
 func TestConvertSystemMessage(t *testing.T) {
 	converter := &MessageConverter{
 		toolIDToFuncNameMap: make(map[string]string),
+		logger:              &NopLogger{},
 	}
 
 	msg := ChatMessage{
@@ -344,6 +349,7 @@ func TestConvertSystemMessage(t *testing.T) {
 func TestBuildToolIDMap(t *testing.T) {
 	converter := &MessageConverter{
 		toolIDToFuncNameMap: make(map[string]string),
+		logger:              &NopLogger{},
 	}
 
 	messages := []ChatMessage{
@@ -394,6 +400,7 @@ func TestMessageConverterConvert(t *testing.T) {
 	converter := &MessageConverter{
 		toolIDToFuncNameMap: make(map[string]string),
 		validator:           NewImageValidator(),
+		logger:              &NopLogger{},
 	}
 
 	result := converter.Convert(messages)
@@ -466,6 +473,7 @@ func TestConvertMessage(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: toolMap,
 				validator:           NewImageValidator(),
+				logger:              &NopLogger{},
 			}
 
 			result := converter.convertMessage(tt.msg)
@@ -570,6 +578,7 @@ func TestConvertImageContent(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
 				validator:           NewImageValidator(),
+				logger:              &NopLogger{},
 			}
 
 			result := converter.convertImageContent(tt.mediaType, tt.imageData, tt.content)
@@ -645,6 +654,7 @@ func TestConvertUserMessage(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
 				validator:           NewImageValidator(),
+				logger:              &NopLogger{},
 			}
 
 			msg := ChatMessage{Role: RoleUser, Content: tt.content}
@@ -734,6 +744,7 @@ func TestConvertTextContent(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
 				validator:           NewImageValidator(),
+				logger:              &NopLogger{},
 			}
 
 			result := converter.convertTextContent(tt.content)
@@ -809,6 +820,7 @@ func TestConvertAssistantToolCall(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			converter := &MessageConverter{
 				toolIDToFuncNameMap: make(map[string]string),
+				logger:              &NopLogger{},
 			}
 
 			result := converter.convertAssistantToolCall(tt.toolCall)

@@ -495,7 +495,7 @@ func TestProcessQuotaData(t *testing.T) {
 			beforeTime := time.Now().Unix()
 
 			// 调用被测函数
-			processQuotaData(tt.quotaData, tt.initialAccount)
+			processQuotaData(tt.quotaData, tt.initialAccount, &NopLogger{})
 
 			// 记录测试后的时间
 			afterTime := time.Now().Unix()
@@ -552,7 +552,7 @@ func TestProcessQuotaData_ConcurrentAccess(t *testing.T) {
 	done := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go func() {
-			processQuotaData(quotaData, account)
+			processQuotaData(quotaData, account, &NopLogger{})
 			done <- true
 		}()
 	}

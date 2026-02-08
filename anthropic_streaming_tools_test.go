@@ -37,6 +37,7 @@ func TestHandleAnthropicStreamingResponseWithMetrics_ShouldEmitToolUseBlock(t *t
 		time.Now(),
 		"acc",
 		metrics,
+		&NopLogger{},
 	)
 
 	body := w.Body.String()
@@ -84,6 +85,7 @@ func TestHandleAnthropicStreamingResponseWithMetrics_MultipleToolsShouldEmitComp
 		time.Now(),
 		"acc",
 		metrics,
+		&NopLogger{},
 	)
 
 	body := w.Body.String()
@@ -126,6 +128,7 @@ func TestHandleAnthropicStreamingResponseWithMetrics_ToolOnlyShouldRecordSuccess
 		time.Now(),
 		"acc",
 		metrics,
+		&NopLogger{},
 	)
 
 	body := w.Body.String()
@@ -168,6 +171,7 @@ func TestHandleAnthropicStreamingResponseWithMetrics_TextThenToolShouldKeepSeque
 		time.Now(),
 		"acc",
 		metrics,
+		&NopLogger{},
 	)
 
 	body := w.Body.String()
@@ -211,6 +215,7 @@ func TestHandleAnthropicStreamingResponseWithMetrics_TextToolTextShouldUseNewTex
 		time.Now(),
 		"acc",
 		metrics,
+		&NopLogger{},
 	)
 
 	body := w.Body.String()
@@ -253,6 +258,7 @@ func TestHandleAnthropicStreamingResponseWithMetrics_ToolThenTextShouldKeepSeque
 		time.Now(),
 		"acc",
 		metrics,
+		&NopLogger{},
 	)
 
 	body := w.Body.String()

@@ -47,7 +47,7 @@ func setJetbrainsHeaders(req *http.Request, jwt string) {
 
 // handleJWTExpiredAndRetry handles JWT expiration and retries the request
 // 注意：此函数假设调用者已经独占账户（通过 AcquireAccount），因此不需要锁
-func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, httpClient *http.Client) (*http.Response, error) {
+func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, httpClient *http.Client, logger Logger) (*http.Response, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -55,10 +55,10 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 
 	if resp.StatusCode == HTTPStatusUnauthorized && account.LicenseID != "" {
 		_ = resp.Body.Close()
-		Info("JWT for %s expired, refreshing...", getTokenDisplayName(account))
+		logger.Info("JWT for %s expired, refreshing...", getTokenDisplayName(account))
 
 		// 刷新 JWT（账户已被当前 goroutine 独占，无需锁）
-		if err := refreshJetbrainsJWT(account, httpClient); err != nil {
+		if err := refreshJetbrainsJWT(account, httpClient, logger); err != nil {
 			return nil, err
 		}
 
@@ -71,9 +71,9 @@ func handleJWTExpiredAndRetry(req *http.Request, account *JetbrainsAccount, http
 
 // ensureValidJWT ensures that the account has a valid JWT
 // 注意：此函数假设调用者已经独占账户（通过 AcquireAccount），因此不需要锁
-func ensureValidJWT(account *JetbrainsAccount, httpClient *http.Client) error {
+func ensureValidJWT(account *JetbrainsAccount, httpClient *http.Client, logger Logger) error {
 	if account.JWT == "" && account.LicenseID != "" {
-		return refreshJetbrainsJWT(account, httpClient)
+		return refreshJetbrainsJWT(account, httpClient, logger)
 	}
 	return nil
 }
@@ -109,8 +109,8 @@ func parseJWTExpiry(tokenStr string) (time.Time, error) {
 }
 
 // refreshJetbrainsJWT refreshes the JWT for a given JetBrains account
-func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) error {
-	Info("Refreshing JWT for licenseId %s...", account.LicenseID)
+func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client, logger Logger) error {
+	logger.Info("Refreshing JWT for licenseId %s...", account.LicenseID)
 
 	payload := map[string]string{"licenseId": account.LicenseID}
 	req, err := createJetbrainsRequest(http.MethodPost, JetBrainsJWTEndpoint, payload, account.Authorization)
@@ -155,14 +155,14 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 		// 不要将此模式用于验证用户提供的 token 或信任其他 claims
 		token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
 		if err != nil {
-			Warn("could not parse JWT: %v", err)
+			logger.Warn("could not parse JWT: %v", err)
 		} else if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			if exp, ok := claims["exp"].(float64); ok {
 				account.ExpiryTime = time.Unix(int64(exp), 0)
 			}
 		}
 
-		Info("Successfully refreshed JWT for licenseId %s, expires at %s", account.LicenseID, account.ExpiryTime.Format(time.RFC3339))
+		logger.Info("Successfully refreshed JWT for licenseId %s, expires at %s", account.LicenseID, account.ExpiryTime.Format(time.RFC3339))
 		return nil
 	}
 
@@ -170,7 +170,7 @@ func refreshJetbrainsJWT(account *JetbrainsAccount, httpClient *http.Client) err
 }
 
 // processQuotaData processes quota data and updates account status
-func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccount) {
+func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccount, logger Logger) {
 	dailyUsed, _ := strconv.ParseFloat(quotaData.Current.Current.Amount, 64)
 	dailyTotal, _ := strconv.ParseFloat(quotaData.Current.Maximum.Amount, 64)
 
@@ -182,13 +182,13 @@ func processQuotaData(quotaData *JetbrainsQuotaResponse, account *JetbrainsAccou
 	setAccountQuotaStatus(account, hasQuota, time.Now())
 
 	if !hasQuota {
-		Warn("Account %s has no quota", getTokenDisplayName(account))
+		logger.Warn("Account %s has no quota", getTokenDisplayName(account))
 	}
 }
 
 // getQuotaData 获取配额数据（使用 CacheService）
-func getQuotaData(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*JetbrainsQuotaResponse, error) {
-	if err := ensureValidJWT(account, httpClient); err != nil {
+func getQuotaData(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService, logger Logger) (*JetbrainsQuotaResponse, error) {
+	if err := ensureValidJWT(account, httpClient, logger); err != nil {
 		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
 	}
 
@@ -207,7 +207,7 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client, cache *Cac
 	}
 
 	// 调用直接获取函数
-	quotaData, err := getQuotaDataDirect(account, httpClient, cache)
+	quotaData, err := getQuotaDataDirect(account, httpClient, cache, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func getQuotaData(account *JetbrainsAccount, httpClient *http.Client, cache *Cac
 
 // getQuotaDataDirect 直接从 JetBrains API 获取配额数据（不使用全局缓存）
 // 注意: 调用者 (getQuotaData) 已确保 JWT 有效，此处无需重复检查
-func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*JetbrainsQuotaResponse, error) {
+func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService, logger Logger) (*JetbrainsQuotaResponse, error) {
 	req, err := http.NewRequest(http.MethodPost, JetBrainsQuotaEndpoint, nil)
 	if err != nil {
 		return nil, err
@@ -231,7 +231,7 @@ func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cach
 	req.Header.Set("Content-Length", "0")
 	setJetbrainsHeaders(req, account.JWT)
 
-	resp, err := handleJWTExpiredAndRetry(req, account, httpClient)
+	resp, err := handleJWTExpiredAndRetry(req, account, httpClient, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -254,10 +254,10 @@ func getQuotaDataDirect(account *JetbrainsAccount, httpClient *http.Client, cach
 
 	if IsDebug() {
 		quotaJSON, _ := sonic.MarshalIndent(quotaData, "", "  ")
-		Debug("JetBrains Quota API Response: %s", string(quotaJSON))
+		logger.Debug("JetBrains Quota API Response: %s", string(quotaJSON))
 	}
 
-	processQuotaData(&quotaData, account)
+	processQuotaData(&quotaData, account, logger)
 
 	return &quotaData, nil
 }

@@ -185,8 +185,8 @@ func getLicenseDisplayName(account *JetbrainsAccount) string {
 }
 
 // getTokenInfoFromAccount 获取账户的Token信息（用于统计页面）
-func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService) (*TokenInfo, error) {
-	quotaData, err := getQuotaData(account, httpClient, cache)
+func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client, cache *CacheService, logger Logger) (*TokenInfo, error) {
+	quotaData, err := getQuotaData(account, httpClient, cache, logger)
 	if err != nil {
 		return &TokenInfo{
 			Name:   getTokenDisplayName(account),
@@ -224,4 +224,11 @@ func getTokenInfoFromAccount(account *JetbrainsAccount, httpClient *http.Client,
 		Status:     status,
 		HasQuota:   hasQuota,
 	}, nil
+}
+
+
+// estimateTokenCount 估算 token 数量
+// 简单估算：平均每个 token 约 4 个字符
+func estimateTokenCount(text string) int {
+	return len(text) / 4
 }

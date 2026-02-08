@@ -102,10 +102,11 @@ func withPanicRecoveryWithMetrics(
 	startTime time.Time,
 	resp **http.Response,
 	errorFormat string,
+	logger Logger,
 ) func() {
 	return func() {
 		if r := recover(); r != nil {
-			Error("Panic in handler: %v", r)
+			logger.Error("Panic in handler: %v", r)
 
 			// 确保资源释放
 			if resp != nil && *resp != nil && (*resp).Body != nil {

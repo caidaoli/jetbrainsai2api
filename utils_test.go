@@ -476,7 +476,7 @@ func TestGetTokenInfoFromAccount(t *testing.T) {
 			httpClient := createOptimizedHTTPClient(DefaultHTTPClientSettings())
 
 			// 使用空的 cache（会导致 API 调用失败，因为没有有效的 JWT）
-			info, err := getTokenInfoFromAccount(tt.account, httpClient, nil)
+			info, err := getTokenInfoFromAccount(tt.account, httpClient, nil, &NopLogger{})
 
 			if tt.expectError {
 				if err == nil {
@@ -656,6 +656,56 @@ func TestGetTokenInfoFromAccount_UsageCalculation(t *testing.T) {
 			const epsilon = 0.0001
 			if (usageRate-tt.expectedUsageRate) > epsilon || (tt.expectedUsageRate-usageRate) > epsilon {
 				t.Errorf("期望 usageRate %.2f%%，实际 %.2f%%", tt.expectedUsageRate, usageRate)
+			}
+		})
+	}
+}
+
+
+// TestEstimateTokenCount 测试token计数估算
+func TestEstimateTokenCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected int
+	}{
+		{
+			name:     "空字符串",
+			text:     "",
+			expected: 0,
+		},
+		{
+			name:     "4个字符",
+			text:     "test",
+			expected: 1,
+		},
+		{
+			name:     "8个字符",
+			text:     "testtest",
+			expected: 2,
+		},
+		{
+			name:     "12个字符",
+			text:     "hello world!",
+			expected: 3,
+		},
+		{
+			name:     "短于4个字符",
+			text:     "hi",
+			expected: 0, // len("hi")/4 = 0
+		},
+		{
+			name:     "长文本",
+			text:     strings.Repeat("a", 100),
+			expected: 25,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := estimateTokenCount(tt.text)
+			if result != tt.expected {
+				t.Errorf("estimateTokenCount(%q) = %d，期望 %d", tt.text, result, tt.expected)
 			}
 		})
 	}

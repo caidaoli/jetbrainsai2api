@@ -9,12 +9,12 @@ import (
 
 // parseJetbrainsToAnthropicDirect 直接将 JetBrains 响应转换为 Anthropic 格式
 // KISS: 消除不必要的中间转换步骤
-func parseJetbrainsToAnthropicDirect(body []byte, model string) (*AnthropicMessagesResponse, error) {
+func parseJetbrainsToAnthropicDirect(body []byte, model string, logger Logger) (*AnthropicMessagesResponse, error) {
 	bodyStr := string(body)
 
 	// 检查是否是流式响应格式
 	if strings.HasPrefix(strings.TrimSpace(bodyStr), "data:") {
-		return parseJetbrainsStreamToAnthropic(bodyStr, model)
+		return parseJetbrainsStreamToAnthropic(bodyStr, model, logger)
 	}
 
 	// 尝试解析为完整的聊天响应
@@ -50,7 +50,7 @@ func parseJetbrainsToAnthropicDirect(body []byte, model string) (*AnthropicMessa
 		},
 	}
 
-	Debug("Direct JetBrains→Anthropic conversion: id=%s, content_blocks=%d",
+	logger.Debug("Direct JetBrains→Anthropic conversion: id=%s, content_blocks=%d",
 		response.ID, len(response.Content))
 
 	return response, nil
@@ -58,7 +58,7 @@ func parseJetbrainsToAnthropicDirect(body []byte, model string) (*AnthropicMessa
 
 // parseJetbrainsStreamToAnthropic 解析 JetBrains 流式响应为 Anthropic 格式
 // SRP: 专门处理流式响应的单一职责
-func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesResponse, error) {
+func parseJetbrainsStreamToAnthropic(bodyStr, model string, logger Logger) (*AnthropicMessagesResponse, error) {
 	lines := strings.Split(bodyStr, "\n")
 	var content []AnthropicContentBlock
 	var currentToolCall *AnthropicContentBlock
@@ -75,7 +75,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 			jsonData := strings.TrimPrefix(line, StreamChunkPrefix)
 			var streamData map[string]any
 			if err := sonic.Unmarshal([]byte(jsonData), &streamData); err != nil {
-				Debug("Failed to parse stream JSON: %v", err)
+				logger.Debug("Failed to parse stream JSON: %v", err)
 				continue
 			}
 
@@ -97,7 +97,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 							Name:  name,
 							Input: make(map[string]any),
 						}
-						Debug("Started tool call: id=%s, name=%s", upstreamID, name)
+						logger.Debug("Started tool call: id=%s, name=%s", upstreamID, name)
 					}
 				} else if currentToolCall != nil {
 					// 累积工具参数
@@ -133,7 +133,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 						}
 					}
 					content = append(content, *currentToolCall)
-					Debug("Completed tool call: id=%s, args=%v", currentToolCall.ID, currentToolCall.Input)
+					logger.Debug("Completed tool call: id=%s, args=%v", currentToolCall.ID, currentToolCall.Input)
 					currentToolCall = nil
 				}
 			}
@@ -166,7 +166,7 @@ func parseJetbrainsStreamToAnthropic(bodyStr, model string) (*AnthropicMessagesR
 		},
 	}
 
-	Debug("Successfully parsed JetBrains stream to Anthropic: content_blocks=%d, finish_reason=%s",
+	logger.Debug("Successfully parsed JetBrains stream to Anthropic: content_blocks=%d, finish_reason=%s",
 		len(content), finishReason)
 
 	return response, nil
@@ -257,7 +257,7 @@ func generateAnthropicStreamResponse(responseType string, content string, index 
 
 	data, err := marshalJSON(resp)
 	if err != nil {
-		Warn("Failed to marshal Anthropic stream response: %v", err)
+		// marshalJSON 不应对我们自己构造的结构体失败
 		return []byte{}
 	}
 	return data

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -31,8 +32,8 @@ func mapJetbrainsToOpenAIFinishReason(jetbrainsReason string) string {
 // processJetbrainsStream processes the event stream from the JetBrains API.
 // It calls the provided onEvent function for each event in the stream.
 // Returns error if stream reading fails or context is cancelled.
-func processJetbrainsStream(ctx context.Context, resp *http.Response, logger Logger, onEvent func(event map[string]any) bool) error {
-	scanner := bufio.NewScanner(resp.Body)
+func processJetbrainsStream(ctx context.Context, body io.Reader, logger Logger, onEvent func(event map[string]any) bool) error {
+	scanner := bufio.NewScanner(body)
 	// 增大缓冲区以处理大型工具调用参数（默认64KB不足）
 	scanner.Buffer(make([]byte, MaxScannerBufferSize), MaxScannerBufferSize)
 	for scanner.Scan() {
@@ -107,7 +108,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
 
-	err := processJetbrainsStream(ctx, resp, logger, func(data map[string]any) bool {
+	err := processJetbrainsStream(ctx, resp.Body, logger, func(data map[string]any) bool {
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
@@ -352,7 +353,7 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 	// 使用请求的 context 来检测客户端断开
 	ctx := c.Request.Context()
 
-	err := processJetbrainsStream(ctx, resp, logger, func(data map[string]any) bool {
+	err := processJetbrainsStream(ctx, resp.Body, logger, func(data map[string]any) bool {
 		eventType, _ := data["type"].(string)
 
 		switch eventType {

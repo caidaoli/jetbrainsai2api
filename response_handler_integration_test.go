@@ -28,7 +28,7 @@ func TestProcessJetbrainsStream_ShouldIgnoreDoneMarkerWithoutError(t *testing.T)
 
 	err := processJetbrainsStream(
 		context.Background(),
-		resp,
+		resp.Body,
 		logger,
 		func(event map[string]any) bool {
 			events++

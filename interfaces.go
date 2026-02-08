@@ -32,13 +32,19 @@ type StorageInterface interface {
 
 // AccountManager 账户管理器接口
 type AccountManager interface {
+	// Core — 请求生命周期中获取/释放账户
 	AcquireAccount(ctx context.Context) (*JetbrainsAccount, error)
 	ReleaseAccount(account *JetbrainsAccount)
+
+	// Lifecycle — 账户维护（JWT 刷新、配额检查）
 	RefreshJWT(account *JetbrainsAccount) error
 	CheckQuota(account *JetbrainsAccount) error
+
+	// Monitoring — 状态查询
 	GetAccountCount() int
 	GetAvailableCount() int
 	GetAllAccounts() []JetbrainsAccount
+
 	Close() error
 }
 

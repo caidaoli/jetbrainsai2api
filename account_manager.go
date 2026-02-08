@@ -228,7 +228,7 @@ func (am *PooledAccountManager) RefreshJWT(account *JetbrainsAccount) error {
 		return nil // 已经是新的了
 	}
 
-	return refreshJetbrainsJWT(account, am.httpClient)
+	return refreshJetbrainsJWT(account, am.httpClient, am.logger)
 }
 
 // CheckQuota 检查账户配额
@@ -252,7 +252,7 @@ func (am *PooledAccountManager) checkQuotaInternal(account *JetbrainsAccount) er
 	}
 
 	// 使用注入的 cache 获取配额数据
-	if _, err := getQuotaData(account, am.httpClient, am.cache); err != nil {
+	if _, err := getQuotaData(account, am.httpClient, am.cache, am.logger); err != nil {
 		return err
 	}
 

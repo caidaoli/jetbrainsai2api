@@ -15,6 +15,7 @@ import (
 type MessageConverter struct {
 	toolIDToFuncNameMap map[string]string
 	validator           *ImageValidator
+	logger              Logger
 }
 
 // converterPool 对象池，复用 MessageConverter 减少内存分配
@@ -23,6 +24,7 @@ var converterPool = sync.Pool{
 		return &MessageConverter{
 			toolIDToFuncNameMap: make(map[string]string, 8), // 预分配容量
 			validator:           NewImageValidator(),
+			logger:              &NopLogger{},
 		}
 	},
 }
@@ -105,7 +107,7 @@ func (c *MessageConverter) convertImageContent(mediaType, imageData string, cont
 
 	// 验证图像
 	if err := c.validator.ValidateImageData(mediaType, imageData); err != nil {
-		Warn("Image validation failed: %v", err)
+		c.logger.Warn("Image validation failed: %v", err)
 		// 图像验证失败，仅使用文本内容
 		textContent := extractTextContent(content)
 		result = append(result, JetbrainsMessage{
@@ -218,7 +220,7 @@ func (c *MessageConverter) convertAssistantToolCall(toolCall ToolCall) []Jetbrai
 func (c *MessageConverter) convertToolMessage(msg ChatMessage) []JetbrainsMessage {
 	functionName := c.toolIDToFuncNameMap[msg.ToolCallID]
 	if functionName == "" {
-		Warn("Cannot find function name for tool_call_id %s", msg.ToolCallID)
+		c.logger.Warn("Cannot find function name for tool_call_id %s", msg.ToolCallID)
 		return nil
 	}
 

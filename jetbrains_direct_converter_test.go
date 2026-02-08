@@ -201,7 +201,7 @@ data: {"type":"FinishMetadata","reason":"stop"}`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp, err := parseJetbrainsToAnthropicDirect([]byte(tt.input), model)
+			resp, err := parseJetbrainsToAnthropicDirect([]byte(tt.input), model, &NopLogger{})
 
 			if tt.wantErr {
 				if err == nil {
@@ -395,7 +395,7 @@ data: {"type":"FinishMetadata","reason":"tool_call"}`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp, err := parseJetbrainsStreamToAnthropic(tt.input, model)
+			resp, err := parseJetbrainsStreamToAnthropic(tt.input, model, &NopLogger{})
 
 			if err != nil {
 				t.Fatalf("不期望错误，但得到: %v", err)
@@ -431,7 +431,7 @@ func TestParseJetbrainsToAnthropicDirectEdgeCases(t *testing.T) {
 		// 注意：当前实现只支持 content 为 string
 		// 如果是数组会被忽略，这个测试验证这个行为
 		input := `{"content": ["block1", "block2"]}`
-		resp, err := parseJetbrainsToAnthropicDirect([]byte(input), model)
+		resp, err := parseJetbrainsToAnthropicDirect([]byte(input), model, &NopLogger{})
 		if err != nil {
 			t.Fatalf("不期望错误，但得到: %v", err)
 		}
@@ -449,7 +449,7 @@ func TestParseJetbrainsToAnthropicDirectEdgeCases(t *testing.T) {
 		inputMap := map[string]any{"content": longText}
 		inputBytes, _ := sonic.Marshal(inputMap)
 
-		resp, err := parseJetbrainsToAnthropicDirect(inputBytes, model)
+		resp, err := parseJetbrainsToAnthropicDirect(inputBytes, model, &NopLogger{})
 		if err != nil {
 			t.Fatalf("不期望错误，但得到: %v", err)
 		}
@@ -460,7 +460,7 @@ func TestParseJetbrainsToAnthropicDirectEdgeCases(t *testing.T) {
 
 	t.Run("特殊字符处理", func(t *testing.T) {
 		specialChars := `{"content": "包含换行\n和引号\"以及emoji 😊"}`
-		resp, err := parseJetbrainsToAnthropicDirect([]byte(specialChars), model)
+		resp, err := parseJetbrainsToAnthropicDirect([]byte(specialChars), model, &NopLogger{})
 		if err != nil {
 			t.Fatalf("不期望错误，但得到: %v", err)
 		}
