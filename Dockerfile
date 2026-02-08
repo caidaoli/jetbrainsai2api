@@ -54,8 +54,7 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 # 从构建镜像复制二进制文件
 COPY --from=builder /app/jetbrainsai2api .
 
-# 复制静态文件和配置文件
-COPY --from=builder /app/static ./static
+# 复制配置文件
 COPY --from=builder /app/models.json .
 
 # 创建数据目录（distroless 镜像已经使用 nonroot 用户）

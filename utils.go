@@ -33,27 +33,6 @@ func getEnvWithDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvBoolWithDefault 获取布尔环境变量，支持标准布尔格式并带默认值回退
-func getEnvBoolWithDefault(key string, defaultValue bool) bool {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return defaultValue
-	}
-
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return defaultValue
-	}
-
-	parsed, err := strconv.ParseBool(trimmed)
-	if err != nil {
-		Warn("Invalid boolean value for %s: %s, using default %t", key, value, defaultValue)
-		return defaultValue
-	}
-
-	return parsed
-}
-
 // parseEnvList 解析逗号分隔的环境变量为去空格的切片
 func parseEnvList(envVar string) []string {
 	if envVar == "" {

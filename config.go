@@ -19,7 +19,6 @@ type ServerConfig struct {
 	JetbrainsAccounts  []JetbrainsAccount // 账户列表
 	ModelsConfigPath   string
 	HTTPClientSettings HTTPClientSettings
-	StatsAuthEnabled   bool             // 是否启用统计端点认证
 	Storage            StorageInterface // 存储实例（依赖注入）
 	Logger             Logger           // 日志实例（依赖注入）
 }

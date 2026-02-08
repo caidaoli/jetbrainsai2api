@@ -180,22 +180,9 @@ func (s *Server) setupRoutes() {
 	s.router.Use(gin.Recovery())
 	s.router.Use(s.corsMiddleware())
 
-	// 统计路由 - 可选认证
-	if s.config.StatsAuthEnabled {
-		// 启用认证时，统计端点需要认证
-		statsGroup := s.router.Group("/")
-		statsGroup.Use(s.authenticateClient)
-		{
-			statsGroup.GET("/", showStatsPage)
-			statsGroup.GET("/api/stats", s.getStatsData)
-		}
-	} else {
-		// 未启用认证时，统计端点公开访问
-		s.router.GET("/", showStatsPage)
-		s.router.GET("/api/stats", s.getStatsData)
-	}
-
-	// 其他公共路由（无需认证）
+	// 公共路由（无需认证）
+	s.router.GET("/", showStatsPage)
+	s.router.GET("/api/stats", s.getStatsData)
 	s.router.GET("/log", streamLog)
 	s.router.GET("/health", s.healthCheck)
 

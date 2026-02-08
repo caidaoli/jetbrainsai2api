@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	_ "embed"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed static/index.html
+var statsPageHTML []byte
 
 // AtomicRequestStats 使用 atomic 操作的高性能统计结构
 // 避免每次请求都获取互斥锁，显著提升并发性能
@@ -502,9 +507,9 @@ func (ms *MetricsService) Close() error {
 
 // ==================== HTTP Handler 函数 ====================
 
-// showStatsPage 显示统计页面
+// showStatsPage 显示统计页面（从 embed 读取，无路径依赖）
 func showStatsPage(c *gin.Context) {
-	c.File("./static/index.html")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", statsPageHTML)
 }
 
 // streamLog 流式日志输出

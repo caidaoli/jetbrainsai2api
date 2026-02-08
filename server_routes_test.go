@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func newTestServer(t *testing.T, statsAuthEnabled bool) *Server {
+func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
 	modelsFile, err := os.CreateTemp("", "models_test_*.json")
@@ -42,9 +42,8 @@ func newTestServer(t *testing.T, statsAuthEnabled bool) *Server {
 			TLSHandshakeTimeout: time.Second,
 			RequestTimeout:      time.Second,
 		},
-		StatsAuthEnabled: statsAuthEnabled,
-		Storage:          storage,
-		Logger:           &NopLogger{},
+		Storage: storage,
+		Logger:  &NopLogger{},
 	}
 
 	server, err := NewServer(config)
@@ -68,28 +67,30 @@ func newTestServer(t *testing.T, statsAuthEnabled bool) *Server {
 	return server
 }
 
-func TestServerRoutes_StatsAuthToggle(t *testing.T) {
-	secured := newTestServer(t, true)
+func TestServerRoutes_StatsPublicAccess(t *testing.T) {
+	server := newTestServer(t)
+
+	// 监控页面公开访问
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-	secured.router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("启用统计鉴权时未携带 key 应返回 401，实际 %d", w.Code)
-	}
-
-	open := newTestServer(t, false)
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
-	w = httptest.NewRecorder()
-	open.router.ServeHTTP(w, req)
+	server.router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("关闭统计鉴权时首页应公开访问，实际 %d", w.Code)
+		t.Fatalf("监控页面应公开访问，实际 %d", w.Code)
+	}
+
+	// /api/stats 公开访问
+	req = httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+	w = httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("/api/stats 应公开访问，实际 %d", w.Code)
 	}
 }
 
 func TestServerRoutes_OpenAIAndAnthropicModelErrors(t *testing.T) {
-	server := newTestServer(t, true)
+	server := newTestServer(t)
 
 	// /v1/models 认证成功且包含 gpt-4o
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
