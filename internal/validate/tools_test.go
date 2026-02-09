@@ -22,11 +22,17 @@ func TestSimplifyComplexTool(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := simplifyComplexTool(tt.properties)
-			if _, ok := result["data"]; !ok { t.Error("期望有 data 字段") }
-			if dataField, ok := result["data"].(map[string]any); ok {
-				if dataField["type"] != core.SchemaTypeString { t.Errorf("data 字段类型应为 string") }
+			if _, ok := result["data"]; !ok {
+				t.Error("期望有 data 字段")
 			}
-			if len(result) > 6 { t.Errorf("简化后的属性数量不应超过6个，实际有 %d 个", len(result)) }
+			if dataField, ok := result["data"].(map[string]any); ok {
+				if dataField["type"] != core.SchemaTypeString {
+					t.Errorf("data 字段类型应为 string")
+				}
+			}
+			if len(result) > 6 {
+				t.Errorf("简化后的属性数量不应超过6个，实际有 %d 个", len(result))
+			}
 		})
 	}
 }
@@ -44,10 +50,16 @@ func TestSimplifyUnionType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := simplifyUnionType(tt.schemaMap, tt.unionType)
-			if result["type"] != core.SchemaTypeString { t.Errorf("简化后类型应为 string") }
-			if _, ok := result["description"]; !ok { t.Error("应该有 description 字段") }
+			if result["type"] != core.SchemaTypeString {
+				t.Errorf("简化后类型应为 string")
+			}
+			if _, ok := result["description"]; !ok {
+				t.Error("应该有 description 字段")
+			}
 			if origDesc, hasOrig := tt.schemaMap["description"]; hasOrig {
-				if result["description"] != origDesc { t.Errorf("应保留原始描述") }
+				if result["description"] != origDesc {
+					t.Errorf("应保留原始描述")
+				}
 			}
 		})
 	}
@@ -67,8 +79,12 @@ func TestTransformParamName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := transformParamName(tt.input)
-			if result != tt.expected { t.Errorf("transformParamName(%q) = %q，期望 %q", tt.input, result, tt.expected) }
-			if len(result) > core.MaxParamNameLength { t.Errorf("结果长度 %d 超过最大限制 %d", len(result), core.MaxParamNameLength) }
+			if result != tt.expected {
+				t.Errorf("transformParamName(%q) = %q，期望 %q", tt.input, result, tt.expected)
+			}
+			if len(result) > core.MaxParamNameLength {
+				t.Errorf("结果长度 %d 超过最大限制 %d", len(result), core.MaxParamNameLength)
+			}
 		})
 	}
 }
@@ -109,7 +125,9 @@ func TestTransformObject(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := make(map[string]any)
 			transformObject(tt.schema, result, tt.depth)
-			if result["type"] != tt.wantType { t.Errorf("期望类型 %s，实际 %v", tt.wantType, result["type"]) }
+			if result["type"] != tt.wantType {
+				t.Errorf("期望类型 %s，实际 %v", tt.wantType, result["type"])
+			}
 		})
 	}
 }
@@ -126,8 +144,12 @@ func TestTransformArray(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := make(map[string]any)
 			transformArray(tt.schema, result)
-			if result["type"] != "array" { t.Errorf("期望类型 array") }
-			if _, ok := result["items"]; !ok { t.Error("应该有 items 字段") }
+			if result["type"] != "array" {
+				t.Errorf("期望类型 array")
+			}
+			if _, ok := result["items"]; !ok {
+				t.Error("应该有 items 字段")
+			}
 		})
 	}
 }
@@ -148,7 +170,9 @@ func TestCopySimpleProperties(t *testing.T) {
 			dest := make(map[string]any)
 			copySimpleProperties(tt.src, dest)
 			for _, key := range tt.wantKeys {
-				if _, ok := dest[key]; !ok { t.Errorf("期望字段 %s 存在", key) }
+				if _, ok := dest[key]; !ok {
+					t.Errorf("期望字段 %s 存在", key)
+				}
 			}
 		})
 	}
@@ -168,7 +192,9 @@ func TestValidateRequiredFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := validateRequiredFields(tt.required, tt.properties)
-			if len(result) != tt.wantCount { t.Errorf("期望 %d 个有效必填字段，实际 %d 个", tt.wantCount, len(result)) }
+			if len(result) != tt.wantCount {
+				t.Errorf("期望 %d 个有效必填字段，实际 %d 个", tt.wantCount, len(result))
+			}
 		})
 	}
 }
@@ -188,7 +214,9 @@ func TestTransformPropertySchema(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, _ := transformPropertySchema(tt.schema, 0)
-			if result["type"] != tt.wantType { t.Errorf("期望类型 %s，实际 %v", tt.wantType, result["type"]) }
+			if result["type"] != tt.wantType {
+				t.Errorf("期望类型 %s，实际 %v", tt.wantType, result["type"])
+			}
 		})
 	}
 }
@@ -205,9 +233,13 @@ func TestTransformProperties(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := transformProperties(tt.properties)
-			if err != nil { t.Fatalf("不期望错误: %v", err) }
+			if err != nil {
+				t.Fatalf("不期望错误: %v", err)
+			}
 			for _, key := range tt.wantKeys {
-				if _, ok := result[key]; !ok { t.Errorf("期望键 %s 存在", key) }
+				if _, ok := result[key]; !ok {
+					t.Errorf("期望键 %s 存在", key)
+				}
 			}
 		})
 	}
@@ -227,11 +259,17 @@ func TestTransformParameters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := transformParameters(tt.params)
 			if tt.wantErr {
-				if err == nil { t.Error("期望有错误") }
+				if err == nil {
+					t.Error("期望有错误")
+				}
 				return
 			}
-			if err != nil { t.Fatalf("不期望错误: %v", err) }
-			if result["type"] != tt.wantType { t.Errorf("期望类型 %s", tt.wantType) }
+			if err != nil {
+				t.Fatalf("不期望错误: %v", err)
+			}
+			if result["type"] != tt.wantType {
+				t.Errorf("期望类型 %s", tt.wantType)
+			}
 		})
 	}
 }
@@ -252,9 +290,13 @@ func TestValidateToolCallResponse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateToolCallResponse(tt.toolCall)
 			if tt.expectErr {
-				if err == nil { t.Error("期望有错误，实际无错误") }
+				if err == nil {
+					t.Error("期望有错误，实际无错误")
+				}
 			} else {
-				if err != nil { t.Errorf("不期望错误: %v", err) }
+				if err != nil {
+					t.Errorf("不期望错误: %v", err)
+				}
 			}
 		})
 	}

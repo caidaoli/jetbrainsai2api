@@ -65,12 +65,14 @@ func (c *LRUCache) startCleanupWorker() {
 	}
 }
 
+// Stop terminates the cache cleanup worker goroutine.
 func (c *LRUCache) Stop() {
 	if c.cancel != nil {
 		c.cancel()
 	}
 }
 
+// Set stores a value in the cache with the given TTL.
 func (c *LRUCache) Set(key string, value any, duration time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -96,6 +98,7 @@ func (c *LRUCache) Set(key string, value any, duration time.Duration) {
 	}
 }
 
+// Get retrieves a value from the cache, returning false if not found or expired.
 func (c *LRUCache) Get(key string) (any, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -170,6 +173,7 @@ type CacheService struct {
 	quota   *LRUCache
 }
 
+// NewCacheService creates a new CacheService with general and quota caches.
 func NewCacheService() *CacheService {
 	return &CacheService{
 		general: NewCache(),
@@ -177,6 +181,7 @@ func NewCacheService() *CacheService {
 	}
 }
 
+// GetQuotaCache retrieves quota data from the quota-specific cache.
 func (cs *CacheService) GetQuotaCache(key string) (*core.JetbrainsQuotaResponse, bool) {
 	cached, found := cs.quota.Get(key)
 	if !found {
@@ -191,10 +196,12 @@ func (cs *CacheService) GetQuotaCache(key string) (*core.JetbrainsQuotaResponse,
 	return quotaData.Clone(), true
 }
 
+// SetQuotaCache stores quota data in the quota-specific cache.
 func (cs *CacheService) SetQuotaCache(key string, value *core.JetbrainsQuotaResponse, duration time.Duration) {
 	cs.quota.Set(key, value.Clone(), duration)
 }
 
+// DeleteQuotaCache removes quota data from the quota-specific cache.
 func (cs *CacheService) DeleteQuotaCache(key string) {
 	cs.quota.mu.Lock()
 	defer cs.quota.mu.Unlock()
@@ -205,23 +212,28 @@ func (cs *CacheService) DeleteQuotaCache(key string) {
 	}
 }
 
+// ClearQuotaCache removes all items from the quota cache.
 func (cs *CacheService) ClearQuotaCache() {
 	cs.quota.Clear()
 }
 
+// Get retrieves a value from the general cache.
 func (cs *CacheService) Get(key string) (any, bool) {
 	return cs.general.Get(key)
 }
 
+// Set stores a value in the general cache.
 func (cs *CacheService) Set(key string, value any, duration time.Duration) {
 	cs.general.Set(key, value, duration)
 }
 
+// Stop terminates both general and quota cache cleanup workers.
 func (cs *CacheService) Stop() {
 	cs.general.Stop()
 	cs.quota.Stop()
 }
 
+// Close stops the cache service and releases resources.
 func (cs *CacheService) Close() error {
 	cs.Stop()
 	return nil

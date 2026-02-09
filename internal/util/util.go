@@ -167,8 +167,8 @@ func GetTokenInfoFromAccount(account *core.JetbrainsAccount, quotaData *core.Jet
 	dailyUsed := 0.0
 	dailyTotal := 0.0
 	if quotaData != nil {
-		fmt.Sscanf(quotaData.Current.Current.Amount, "%f", &dailyUsed)
-		fmt.Sscanf(quotaData.Current.Maximum.Amount, "%f", &dailyTotal)
+		_, _ = fmt.Sscanf(quotaData.Current.Current.Amount, "%f", &dailyUsed)
+		_, _ = fmt.Sscanf(quotaData.Current.Maximum.Amount, "%f", &dailyTotal)
 	}
 
 	var usageRate float64

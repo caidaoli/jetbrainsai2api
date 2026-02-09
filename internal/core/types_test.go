@@ -52,7 +52,7 @@ func TestFlexibleString_InStruct(t *testing.T) {
 		System FlexibleString `json:"system"`
 	}
 	tests := []struct {
-		name string
+		name  string
 		input string
 		want  string
 	}{

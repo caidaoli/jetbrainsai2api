@@ -161,7 +161,9 @@ func TestHandleNonStreamingResponseWithMetrics_MultipleLegacyFunctionCalls(t *te
 	if err := sonic.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
 		t.Fatalf("响应 JSON 解析失败: %v", err)
 	}
-	if len(parsed.Choices) != 1 { t.Fatalf("期望 1 个 choice") }
+	if len(parsed.Choices) != 1 {
+		t.Fatalf("期望 1 个 choice")
+	}
 	if len(parsed.Choices[0].Message.ToolCalls) != 2 {
 		t.Fatalf("期望保留 2 个 legacy function call，实际 %d", len(parsed.Choices[0].Message.ToolCalls))
 	}

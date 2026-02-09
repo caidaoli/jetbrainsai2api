@@ -95,10 +95,9 @@ func TestMetricsService_DefaultHistorySize(t *testing.T) {
 	})
 	defer func() { _ = ms.Close() }()
 
-	if ms.maxHistorySize != 0 {
-		// HistorySize=0 is passed directly; the service uses it as-is
-		// This just verifies no crash
-	}
+	// HistorySize=0 is passed directly; the service uses it as-is.
+	// This test just verifies no crash on construction.
+	_ = ms.maxHistorySize
 }
 
 func TestRecordSuccessWithMetrics(t *testing.T) {

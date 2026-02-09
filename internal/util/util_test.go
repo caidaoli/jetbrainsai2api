@@ -27,7 +27,9 @@ func TestParseEnvList(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ParseEnvList(tt.input)
 			if tt.expected == nil {
-				if result != nil { t.Errorf("期望 nil，实际 %v", result) }
+				if result != nil {
+					t.Errorf("期望 nil，实际 %v", result)
+				}
 				return
 			}
 			if len(result) != len(tt.expected) {
@@ -35,7 +37,9 @@ func TestParseEnvList(t *testing.T) {
 				return
 			}
 			for i, expected := range tt.expected {
-				if result[i] != expected { t.Errorf("索引 %d: 期望 '%s'，实际 '%s'", i, expected, result[i]) }
+				if result[i] != expected {
+					t.Errorf("索引 %d: 期望 '%s'，实际 '%s'", i, expected, result[i])
+				}
 			}
 		})
 	}
@@ -61,7 +65,9 @@ func TestExtractTextContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ExtractTextContent(tt.content)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }
@@ -69,7 +75,7 @@ func TestExtractTextContent(t *testing.T) {
 func TestTruncateString(t *testing.T) {
 	tests := []struct {
 		name, input, replacement, expected string
-		prefixLen, suffixLen              int
+		prefixLen, suffixLen               int
 	}{
 		{"短字符串不截断", "short", "...", "short", 3, 3},
 		{"超过阈值截断", "1234567890", "...", "123...890", 3, 3},
@@ -79,7 +85,9 @@ func TestTruncateString(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := TruncateString(tt.input, tt.prefixLen, tt.suffixLen, tt.replacement)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }
@@ -95,8 +103,12 @@ func TestGenerateID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			id := GenerateID(tt.prefix)
-			if !strings.HasPrefix(id, tt.prefix) { t.Errorf("ID应以 '%s' 为前缀，实际: '%s'", tt.prefix, id) }
-			if len(id) < len(tt.prefix)+10 { t.Errorf("ID长度过短: %s", id) }
+			if !strings.HasPrefix(id, tt.prefix) {
+				t.Errorf("ID应以 '%s' 为前缀，实际: '%s'", tt.prefix, id)
+			}
+			if len(id) < len(tt.prefix)+10 {
+				t.Errorf("ID长度过短: %s", id)
+			}
 		})
 	}
 }
@@ -114,7 +126,9 @@ func TestGetTokenDisplayName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetTokenDisplayName(tt.account)
-			if !strings.Contains(result, tt.contains) { t.Errorf("期望包含 '%s'，实际 '%s'", tt.contains, result) }
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("期望包含 '%s'，实际 '%s'", tt.contains, result)
+			}
 		})
 	}
 }
@@ -132,7 +146,9 @@ func TestGetLicenseDisplayName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetLicenseDisplayName(tt.account)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }
@@ -140,7 +156,7 @@ func TestGetLicenseDisplayName(t *testing.T) {
 func TestGetEnvWithDefault(t *testing.T) {
 	tests := []struct {
 		name, key, setValue, defaultValue, expected string
-		setEnv                                     bool
+		setEnv                                      bool
 	}{
 		{"使用默认值", "TEST_ENV_NOT_SET_12345", "", "default_value", "default_value", false},
 		{"使用环境变量值", "TEST_ENV_SET_12345", "actual_value", "default_value", "actual_value", true},
@@ -154,7 +170,9 @@ func TestGetEnvWithDefault(t *testing.T) {
 				defer func() { _ = os.Unsetenv(tt.key) }()
 			}
 			result := GetEnvWithDefault(tt.key, tt.defaultValue)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }
@@ -174,7 +192,9 @@ func TestEstimateTokenCount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := EstimateTokenCount(tt.text)
-			if result != tt.expected { t.Errorf("estimateTokenCount(%q) = %d，期望 %d", tt.text, result, tt.expected) }
+			if result != tt.expected {
+				t.Errorf("estimateTokenCount(%q) = %d，期望 %d", tt.text, result, tt.expected)
+			}
 		})
 	}
 }
@@ -191,7 +211,9 @@ func TestGenerateRandomID(t *testing.T) {
 	ids := make(map[string]bool)
 	for i := 0; i < 100; i++ {
 		newID := GenerateRandomID(core.ToolCallIDPrefix)
-		if ids[newID] { t.Errorf("生成了重复的ID: %s", newID) }
+		if ids[newID] {
+			t.Errorf("生成了重复的ID: %s", newID)
+		}
 		ids[newID] = true
 	}
 }
@@ -215,7 +237,9 @@ func TestGetTokenInfoFromAccount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			info := GetTokenInfoFromAccount(tt.account, tt.quotaData, tt.err)
-			if info == nil { t.Fatal("返回的 TokenInfo 不应为 nil") }
+			if info == nil {
+				t.Fatal("返回的 TokenInfo 不应为 nil")
+			}
 			if info.Status != tt.expectedStatus {
 				t.Errorf("期望状态 '%s'，实际 '%s'", tt.expectedStatus, info.Status)
 			}

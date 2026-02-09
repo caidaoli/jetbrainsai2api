@@ -14,15 +14,21 @@ func TestLRUCache_BasicSetGet(t *testing.T) {
 	defer cache.Stop()
 	cache.Set("key1", "value1", 1*time.Hour)
 	value, found := cache.Get("key1")
-	if !found { t.Error("Expected to find key1") }
-	if value != "value1" { t.Errorf("Expected 'value1', got '%v'", value) }
+	if !found {
+		t.Error("Expected to find key1")
+	}
+	if value != "value1" {
+		t.Errorf("Expected 'value1', got '%v'", value)
+	}
 }
 
 func TestLRUCache_GetNonExistent(t *testing.T) {
 	cache := NewCache()
 	defer cache.Stop()
 	_, found := cache.Get("nonexistent")
-	if found { t.Error("Should not find nonexistent key") }
+	if found {
+		t.Error("Should not find nonexistent key")
+	}
 }
 
 func TestLRUCache_Expiration(t *testing.T) {
@@ -30,10 +36,14 @@ func TestLRUCache_Expiration(t *testing.T) {
 	defer cache.Stop()
 	cache.Set("key", "value", 100*time.Millisecond)
 	_, found := cache.Get("key")
-	if !found { t.Error("Key should be found immediately after set") }
+	if !found {
+		t.Error("Key should be found immediately after set")
+	}
 	time.Sleep(150 * time.Millisecond)
 	_, found = cache.Get("key")
-	if found { t.Error("Key should be expired") }
+	if found {
+		t.Error("Key should be expired")
+	}
 }
 
 func TestLRUCache_Eviction(t *testing.T) {
@@ -46,11 +56,17 @@ func TestLRUCache_Eviction(t *testing.T) {
 	cache.Set("key2", "value2", 1*time.Hour)
 	cache.Set("key3", "value3", 1*time.Hour)
 	_, found := cache.Get("key1")
-	if found { t.Error("key1 should be evicted") }
+	if found {
+		t.Error("key1 should be evicted")
+	}
 	_, found = cache.Get("key2")
-	if !found { t.Error("key2 should exist") }
+	if !found {
+		t.Error("key2 should exist")
+	}
 	_, found = cache.Get("key3")
-	if !found { t.Error("key3 should exist") }
+	if !found {
+		t.Error("key3 should exist")
+	}
 }
 
 func TestLRUCache_LRUOrder(t *testing.T) {
@@ -64,9 +80,13 @@ func TestLRUCache_LRUOrder(t *testing.T) {
 	cache.Get("key1")
 	cache.Set("key3", "value3", 1*time.Hour)
 	_, found := cache.Get("key2")
-	if found { t.Error("key2 should be evicted (least recently used)") }
+	if found {
+		t.Error("key2 should be evicted (least recently used)")
+	}
 	_, found = cache.Get("key1")
-	if !found { t.Error("key1 should exist") }
+	if !found {
+		t.Error("key1 should exist")
+	}
 }
 
 func TestLRUCache_ConcurrentAccess(t *testing.T) {
@@ -103,10 +123,14 @@ func TestLRUCache_UpdateExisting(t *testing.T) {
 	defer cache.Stop()
 	cache.Set("key", "value1", 1*time.Hour)
 	v, _ := cache.Get("key")
-	if v != "value1" { t.Errorf("Expected 'value1'") }
+	if v != "value1" {
+		t.Errorf("Expected 'value1'")
+	}
 	cache.Set("key", "value2", 1*time.Hour)
 	v, _ = cache.Get("key")
-	if v != "value2" { t.Errorf("Expected 'value2'") }
+	if v != "value2" {
+		t.Errorf("Expected 'value2'")
+	}
 }
 
 func TestLRUCache_ExpiredItemCleanup(t *testing.T) {
@@ -116,13 +140,19 @@ func TestLRUCache_ExpiredItemCleanup(t *testing.T) {
 	cache.Set("key2", "value2", 1*time.Hour)
 	time.Sleep(100 * time.Millisecond)
 	_, found := cache.Get("key1")
-	if found { t.Error("key1 should be expired") }
+	if found {
+		t.Error("key1 should be expired")
+	}
 	_, found = cache.Get("key2")
-	if !found { t.Error("key2 should still exist") }
+	if !found {
+		t.Error("key2 should still exist")
+	}
 	cache.mu.Lock()
 	_, exists := cache.items["key1"]
 	cache.mu.Unlock()
-	if exists { t.Error("key1 should be removed") }
+	if exists {
+		t.Error("key1 should be removed")
+	}
 }
 
 func TestLRUCache_ZeroTTL(t *testing.T) {
@@ -130,7 +160,9 @@ func TestLRUCache_ZeroTTL(t *testing.T) {
 	defer cache.Stop()
 	cache.Set("key", "value", 0)
 	_, found := cache.Get("key")
-	if found { t.Error("Key with zero TTL should be immediately expired") }
+	if found {
+		t.Error("Key with zero TTL should be immediately expired")
+	}
 }
 
 func TestLRUCache_NegativeTTL(t *testing.T) {
@@ -138,7 +170,9 @@ func TestLRUCache_NegativeTTL(t *testing.T) {
 	defer cache.Stop()
 	cache.Set("key", "value", -1*time.Second)
 	_, found := cache.Get("key")
-	if found { t.Error("Key with negative TTL should be immediately expired") }
+	if found {
+		t.Error("Key with negative TTL should be immediately expired")
+	}
 }
 
 func TestLRUCache_PeriodicCleanup(t *testing.T) {
@@ -150,7 +184,9 @@ func TestLRUCache_PeriodicCleanup(t *testing.T) {
 	cache.mu.Lock()
 	itemCount := len(cache.items)
 	cache.mu.Unlock()
-	if itemCount != 5 { t.Errorf("Expected 5 items, got %d", itemCount) }
+	if itemCount != 5 {
+		t.Errorf("Expected 5 items, got %d", itemCount)
+	}
 }
 
 func TestLRUCache_TypeSafety(t *testing.T) {
@@ -160,17 +196,27 @@ func TestLRUCache_TypeSafety(t *testing.T) {
 	cache.Set("int", 42, 1*time.Hour)
 	cache.Set("struct", struct{ Name string }{"test"}, 1*time.Hour)
 	strVal, _ := cache.Get("string")
-	if _, ok := strVal.(string); !ok { t.Error("Expected string type") }
+	if _, ok := strVal.(string); !ok {
+		t.Error("Expected string type")
+	}
 	intVal, _ := cache.Get("int")
-	if _, ok := intVal.(int); !ok { t.Error("Expected int type") }
+	if _, ok := intVal.(int); !ok {
+		t.Error("Expected int type")
+	}
 }
 
 func TestNewCacheService(t *testing.T) {
 	service := NewCacheService()
-	if service == nil { t.Fatal("NewCacheService should not return nil") }
+	if service == nil {
+		t.Fatal("NewCacheService should not return nil")
+	}
 	defer func() { _ = service.Close() }()
-	if service.general == nil { t.Error("general cache should be initialized") }
-	if service.quota == nil { t.Error("quota cache should be initialized") }
+	if service.general == nil {
+		t.Error("general cache should be initialized")
+	}
+	if service.quota == nil {
+		t.Error("quota cache should be initialized")
+	}
 }
 
 func TestCacheService_QuotaCache(t *testing.T) {
@@ -182,12 +228,20 @@ func TestCacheService_QuotaCache(t *testing.T) {
 	cacheKey := "quota:v1:test-license"
 	service.SetQuotaCache(cacheKey, quotaResponse, 1*time.Hour)
 	result, found := service.GetQuotaCache(cacheKey)
-	if !found { t.Error("配额缓存应该被找到") }
-	if result == nil { t.Fatal("返回的配额数据不应该为nil") }
-	if result.Current.Current.Amount != "100" { t.Errorf("配额当前值错误") }
+	if !found {
+		t.Error("配额缓存应该被找到")
+	}
+	if result == nil {
+		t.Fatal("返回的配额数据不应该为nil")
+	}
+	if result.Current.Current.Amount != "100" {
+		t.Errorf("配额当前值错误")
+	}
 	service.DeleteQuotaCache(cacheKey)
 	_, found = service.GetQuotaCache(cacheKey)
-	if found { t.Error("删除后不应该找到配额缓存") }
+	if found {
+		t.Error("删除后不应该找到配额缓存")
+	}
 }
 
 func TestCacheService_QuotaCacheDeepCopy(t *testing.T) {
@@ -200,7 +254,9 @@ func TestCacheService_QuotaCacheDeepCopy(t *testing.T) {
 	result1, _ := service.GetQuotaCache(cacheKey)
 	result1.Current.Current.Amount = "modified"
 	result2, _ := service.GetQuotaCache(cacheKey)
-	if result2.Current.Current.Amount == "modified" { t.Error("深拷贝失败") }
+	if result2.Current.Current.Amount == "modified" {
+		t.Error("深拷贝失败")
+	}
 }
 
 func TestCacheService_ClearQuotaCache(t *testing.T) {
@@ -215,7 +271,9 @@ func TestCacheService_ClearQuotaCache(t *testing.T) {
 	service.ClearQuotaCache()
 	for _, key := range keys {
 		_, found := service.GetQuotaCache(key)
-		if found { t.Errorf("配额缓存 %s 应该被清除", key) }
+		if found {
+			t.Errorf("配额缓存 %s 应该被清除", key)
+		}
 	}
 }
 
@@ -224,8 +282,12 @@ func TestCacheService_GetSet(t *testing.T) {
 	defer func() { _ = service.Close() }()
 	service.Set("test-key", "test-value", 1*time.Hour)
 	value, found := service.Get("test-key")
-	if !found { t.Error("应该找到缓存值") }
-	if value != "test-value" { t.Errorf("期望 'test-value'，实际 '%v'", value) }
+	if !found {
+		t.Error("应该找到缓存值")
+	}
+	if value != "test-value" {
+		t.Errorf("期望 'test-value'，实际 '%v'", value)
+	}
 }
 
 func TestCacheService_Stop(t *testing.T) {
@@ -247,9 +309,15 @@ func TestGenerateMessagesCacheKey(t *testing.T) {
 	key1 := GenerateMessagesCacheKey(messages1)
 	key2 := GenerateMessagesCacheKey(messages2)
 	key3 := GenerateMessagesCacheKey(messages3)
-	if key1 != key2 { t.Error("相同消息应该生成相同的缓存键") }
-	if key1 == key3 { t.Error("不同消息应该生成不同的缓存键") }
-	if len(key1) == 0 { t.Error("缓存键不应该为空") }
+	if key1 != key2 {
+		t.Error("相同消息应该生成相同的缓存键")
+	}
+	if key1 == key3 {
+		t.Error("不同消息应该生成不同的缓存键")
+	}
+	if len(key1) == 0 {
+		t.Error("缓存键不应该为空")
+	}
 }
 
 func TestGenerateToolsCacheKey(t *testing.T) {
@@ -259,8 +327,12 @@ func TestGenerateToolsCacheKey(t *testing.T) {
 	key1 := GenerateToolsCacheKey(tools1)
 	key2 := GenerateToolsCacheKey(tools2)
 	key3 := GenerateToolsCacheKey(tools3)
-	if key1 != key2 { t.Error("相同工具应该生成相同的缓存键") }
-	if key1 == key3 { t.Error("不同工具应该生成不同的缓存键") }
+	if key1 != key2 {
+		t.Error("相同工具应该生成相同的缓存键")
+	}
+	if key1 == key3 {
+		t.Error("不同工具应该生成不同的缓存键")
+	}
 }
 
 func TestGenerateQuotaCacheKey(t *testing.T) {
@@ -275,7 +347,9 @@ func TestGenerateQuotaCacheKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			key := GenerateQuotaCacheKey(tt.account)
-			if key == "" { t.Error("缓存键不应该为空") }
+			if key == "" {
+				t.Error("缓存键不应该为空")
+			}
 		})
 	}
 }
@@ -295,10 +369,16 @@ func TestMarshalJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := util.MarshalJSON(tt.input)
 			if tt.wantErr {
-				if err == nil { t.Error("期望有错误") }
+				if err == nil {
+					t.Error("期望有错误")
+				}
 			} else {
-				if err != nil { t.Errorf("不期望错误: %v", err) }
-				if len(result) == 0 { t.Error("结果不应该为空") }
+				if err != nil {
+					t.Errorf("不期望错误: %v", err)
+				}
+				if len(result) == 0 {
+					t.Error("结果不应该为空")
+				}
 			}
 		})
 	}
@@ -311,7 +391,9 @@ func TestLRUCache_Clear(t *testing.T) {
 	cache.Set("key2", "value2", 1*time.Hour)
 	cache.Clear()
 	_, found := cache.Get("key1")
-	if found { t.Error("key1 应该被清除") }
+	if found {
+		t.Error("key1 应该被清除")
+	}
 }
 
 func TestLRUCache_CleanupExpired(t *testing.T) {
@@ -322,9 +404,13 @@ func TestLRUCache_CleanupExpired(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	cache.cleanupExpired()
 	_, found := cache.Get("short")
-	if found { t.Error("short 应该被清理") }
+	if found {
+		t.Error("short 应该被清理")
+	}
 	_, found = cache.Get("long")
-	if !found { t.Error("long 应该仍然存在") }
+	if !found {
+		t.Error("long 应该仍然存在")
+	}
 }
 
 func TestLRUCache_CleanupExpired_Empty(t *testing.T) {
@@ -354,18 +440,26 @@ func TestGenerateMessagesCacheKey_WithToolCalls(t *testing.T) {
 	key1 := GenerateMessagesCacheKey(messages1)
 	key2 := GenerateMessagesCacheKey(messages2)
 	key3 := GenerateMessagesCacheKey(messages3)
-	if key1 != key2 { t.Error("相同工具调用消息应该生成相同缓存键") }
-	if key1 == key3 { t.Error("不同工具调用消息应该生成不同缓存键") }
+	if key1 != key2 {
+		t.Error("相同工具调用消息应该生成相同缓存键")
+	}
+	if key1 == key3 {
+		t.Error("不同工具调用消息应该生成不同缓存键")
+	}
 }
 
 func TestGenerateMessagesCacheKey_EmptyMessages(t *testing.T) {
 	key := GenerateMessagesCacheKey([]core.ChatMessage{})
-	if key == "" { t.Error("即使是空消息列表也应该生成缓存键") }
+	if key == "" {
+		t.Error("即使是空消息列表也应该生成缓存键")
+	}
 }
 
 func TestGenerateToolsCacheKey_EmptyTools(t *testing.T) {
 	key := GenerateToolsCacheKey([]core.Tool{})
-	if key == "" { t.Error("即使是空工具列表也应该生成缓存键") }
+	if key == "" {
+		t.Error("即使是空工具列表也应该生成缓存键")
+	}
 }
 
 func TestCacheService_QuotaCache_Expiration(t *testing.T) {
@@ -375,10 +469,14 @@ func TestCacheService_QuotaCache_Expiration(t *testing.T) {
 	quotaResponse.Current.Current.Amount = "100"
 	service.SetQuotaCache("test-key", quotaResponse, 50*time.Millisecond)
 	_, found := service.GetQuotaCache("test-key")
-	if !found { t.Error("配额缓存应该存在") }
+	if !found {
+		t.Error("配额缓存应该存在")
+	}
 	time.Sleep(100 * time.Millisecond)
 	_, found = service.GetQuotaCache("test-key")
-	if found { t.Error("配额缓存应该已过期") }
+	if found {
+		t.Error("配额缓存应该已过期")
+	}
 }
 
 func TestTruncateCacheKey(t *testing.T) {
@@ -394,7 +492,9 @@ func TestTruncateCacheKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := TruncateCacheKey(tt.key, tt.maxLen)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }

@@ -22,11 +22,11 @@ const (
 
 // Cache config constants
 const (
-	CacheDefaultCapacity     = 1000
-	CacheCleanupInterval     = 5 * time.Minute
+	CacheDefaultCapacity      = 1000
+	CacheCleanupInterval      = 5 * time.Minute
 	MessageConversionCacheTTL = 10 * time.Minute
-	ToolsValidationCacheTTL  = 30 * time.Minute
-	CacheKeyVersion          = "v1"
+	ToolsValidationCacheTTL   = 30 * time.Minute
+	CacheKeyVersion           = "v1"
 )
 
 // Stats and monitoring constants
@@ -65,10 +65,10 @@ var SupportedImageFormats = []string{ImageFormatPNG, ImageFormatJPEG, ImageForma
 
 // Tool validation constants
 const (
-	MaxParamNameLength                      = 64
-	ParamNamePattern                        = "^[a-zA-Z0-9_.-]{1,64}$"
-	MaxPropertiesBeforeSimplification       = 15
-	MaxNestingDepth                         = 5
+	MaxParamNameLength                       = 64
+	ParamNamePattern                         = "^[a-zA-Z0-9_.-]{1,64}$"
+	MaxPropertiesBeforeSimplification        = 15
+	MaxNestingDepth                          = 5
 	MaxPreservedPropertiesInSimplifiedSchema = 5
 )
 
@@ -211,14 +211,14 @@ const (
 
 // Anthropic response type constants
 const (
-	AnthropicTypeMessage     = "message"
-	AnthropicDeltaTypeText   = "text_delta"
-	StopReasonEndTurn        = "end_turn"
-	StopReasonToolUse        = "tool_use"
-	StopReasonMaxTokens      = "max_tokens"
-	ContentBlockTypeToolUse  = "tool_use"
+	AnthropicTypeMessage       = "message"
+	AnthropicDeltaTypeText     = "text_delta"
+	StopReasonEndTurn          = "end_turn"
+	StopReasonToolUse          = "tool_use"
+	StopReasonMaxTokens        = "max_tokens"
+	ContentBlockTypeToolUse    = "tool_use"
 	ContentBlockTypeToolResult = "tool_result"
-	ContentBlockTypeText     = "text"
+	ContentBlockTypeText       = "text"
 )
 
 // Anthropic error type constants

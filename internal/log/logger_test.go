@@ -10,9 +10,15 @@ import (
 func TestNewAppLoggerWithConfig(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewAppLoggerWithConfig(&buf, true)
-	if logger == nil { t.Fatal("日志实例不应为nil") }
-	if !logger.debug { t.Error("调试模式应为true") }
-	if logger.fileHandle != nil { t.Error("外部输出时不应持有文件句柄") }
+	if logger == nil {
+		t.Fatal("日志实例不应为nil")
+	}
+	if !logger.debug {
+		t.Error("调试模式应为true")
+	}
+	if logger.fileHandle != nil {
+		t.Error("外部输出时不应持有文件句柄")
+	}
 }
 
 func TestAppLogger_Debug(t *testing.T) {
@@ -47,8 +53,12 @@ func TestAppLogger_Info(t *testing.T) {
 	logger := NewAppLoggerWithConfig(&buf, false)
 	logger.Info("测试信息: %s", "参数值")
 	output := buf.String()
-	if !strings.Contains(output, "[INFO]") { t.Error("信息日志应包含 [INFO] 前缀") }
-	if !strings.Contains(output, "测试信息: 参数值") { t.Error("日志应包含格式化后的消息") }
+	if !strings.Contains(output, "[INFO]") {
+		t.Error("信息日志应包含 [INFO] 前缀")
+	}
+	if !strings.Contains(output, "测试信息: 参数值") {
+		t.Error("日志应包含格式化后的消息")
+	}
 }
 
 func TestAppLogger_Warn(t *testing.T) {
@@ -56,8 +66,12 @@ func TestAppLogger_Warn(t *testing.T) {
 	logger := NewAppLoggerWithConfig(&buf, false)
 	logger.Warn("测试警告: %d", 123)
 	output := buf.String()
-	if !strings.Contains(output, "[WARN]") { t.Error("警告日志应包含 [WARN] 前缀") }
-	if !strings.Contains(output, "测试警告: 123") { t.Error("日志应包含格式化后的消息") }
+	if !strings.Contains(output, "[WARN]") {
+		t.Error("警告日志应包含 [WARN] 前缀")
+	}
+	if !strings.Contains(output, "测试警告: 123") {
+		t.Error("日志应包含格式化后的消息")
+	}
 }
 
 func TestAppLogger_Error(t *testing.T) {
@@ -65,8 +79,12 @@ func TestAppLogger_Error(t *testing.T) {
 	logger := NewAppLoggerWithConfig(&buf, false)
 	logger.Error("测试错误: %v", "详细信息")
 	output := buf.String()
-	if !strings.Contains(output, "[ERROR]") { t.Error("错误日志应包含 [ERROR] 前缀") }
-	if !strings.Contains(output, "测试错误: 详细信息") { t.Error("日志应包含格式化后的消息") }
+	if !strings.Contains(output, "[ERROR]") {
+		t.Error("错误日志应包含 [ERROR] 前缀")
+	}
+	if !strings.Contains(output, "测试错误: 详细信息") {
+		t.Error("日志应包含格式化后的消息")
+	}
 }
 
 func TestAppLogger_NilSafety(t *testing.T) {
@@ -95,7 +113,9 @@ func TestAppLogger_Close(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := tt.fn()
-			if err != nil { t.Errorf("关闭日志不应返回错误: %v", err) }
+			if err != nil {
+				t.Errorf("关闭日志不应返回错误: %v", err)
+			}
 		})
 	}
 }

@@ -62,9 +62,15 @@ func TestRequestProcessor_ProcessTools_NoTools(t *testing.T) {
 	}
 
 	result := processor.ProcessTools(request)
-	if result.Error != nil { t.Errorf("不应该有错误: %v", result.Error) }
-	if !result.ValidatedDone { t.Error("应该标记为验证完成") }
-	if len(result.Data) != 0 { t.Errorf("期望0个数据项，实际 %d 个", len(result.Data)) }
+	if result.Error != nil {
+		t.Errorf("不应该有错误: %v", result.Error)
+	}
+	if !result.ValidatedDone {
+		t.Error("应该标记为验证完成")
+	}
+	if len(result.Data) != 0 {
+		t.Errorf("期望0个数据项，实际 %d 个", len(result.Data))
+	}
 }
 
 func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
@@ -94,9 +100,15 @@ func TestRequestProcessor_ProcessTools_WithTools(t *testing.T) {
 	}
 
 	result := processor.ProcessTools(request)
-	if result.Error != nil { t.Errorf("不应该有错误: %v", result.Error) }
-	if !result.ValidatedDone { t.Error("应该标记为验证完成") }
-	if len(result.Data) != 2 { t.Errorf("期望2个数据项，实际 %d 个", len(result.Data)) }
+	if result.Error != nil {
+		t.Errorf("不应该有错误: %v", result.Error)
+	}
+	if !result.ValidatedDone {
+		t.Error("应该标记为验证完成")
+	}
+	if len(result.Data) != 2 {
+		t.Errorf("期望2个数据项，实际 %d 个", len(result.Data))
+	}
 }
 
 func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
@@ -112,8 +124,12 @@ func TestRequestProcessor_BuildJetbrainsPayload(t *testing.T) {
 	data := []core.JetbrainsData{}
 
 	payloadBytes, err := processor.BuildJetbrainsPayload(request, jetbrainsMessages, data)
-	if err != nil { t.Errorf("构建 payload 不应该失败: %v", err) }
-	if len(payloadBytes) == 0 { t.Error("payload 不应该为空") }
+	if err != nil {
+		t.Errorf("构建 payload 不应该失败: %v", err)
+	}
+	if len(payloadBytes) == 0 {
+		t.Error("payload 不应该为空")
+	}
 
 	var payload core.JetbrainsPayload
 	if err := sonic.Unmarshal(payloadBytes, &payload); err != nil {
@@ -174,18 +190,24 @@ func TestRequestProcessor_ProcessTools_Caching(t *testing.T) {
 	result1 := processor.ProcessTools(request)
 	duration1 := time.Since(startTime)
 
-	if result1.Error != nil { t.Errorf("第一次调用不应该失败: %v", result1.Error) }
+	if result1.Error != nil {
+		t.Errorf("第一次调用不应该失败: %v", result1.Error)
+	}
 
 	startTime = time.Now()
 	result2 := processor.ProcessTools(request)
 	duration2 := time.Since(startTime)
 
-	if result2.Error != nil { t.Errorf("第二次调用不应该失败: %v", result2.Error) }
+	if result2.Error != nil {
+		t.Errorf("第二次调用不应该失败: %v", result2.Error)
+	}
 
 	if duration2 > duration1 {
 		t.Logf("警告: 第二次调用（%v）比第一次（%v）慢", duration2, duration1)
 	}
-	if len(result1.Data) != len(result2.Data) { t.Error("两次调用应该返回相同数量的数据") }
+	if len(result1.Data) != len(result2.Data) {
+		t.Error("两次调用应该返回相同数量的数据")
+	}
 }
 
 func TestGetInternalModelName(t *testing.T) {
@@ -206,7 +228,9 @@ func TestGetInternalModelName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetInternalModelName(config, tt.modelID)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }

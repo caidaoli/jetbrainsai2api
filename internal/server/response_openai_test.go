@@ -40,7 +40,9 @@ func TestMapJetbrainsToOpenAIFinishReason(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := MapJetbrainsToOpenAIFinishReason(tt.input)
-			if result != tt.expected { t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result) }
+			if result != tt.expected {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
+			}
 		})
 	}
 }
@@ -56,8 +58,13 @@ func TestStringPtr(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := stringPtr(tt.input)
-			if result == nil { t.Error("返回值不应为nil"); return }
-			if *result != tt.input { t.Errorf("期望 '%s'，实际 '%s'", tt.input, *result) }
+			if result == nil {
+				t.Error("返回值不应为nil")
+				return
+			}
+			if *result != tt.input {
+				t.Errorf("期望 '%s'，实际 '%s'", tt.input, *result)
+			}
 		})
 	}
 }

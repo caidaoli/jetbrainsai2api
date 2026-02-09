@@ -9,7 +9,7 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// JetbrainsQuotaResponse defines the structure for the JetBrains quota API response
+// JetbrainsQuotaResponse defines the structure for the JetBrains quota API response.
 type JetbrainsQuotaResponse struct {
 	Current struct {
 		Current struct {
@@ -22,7 +22,7 @@ type JetbrainsQuotaResponse struct {
 	Until string `json:"until"`
 }
 
-// Clone returns a deep copy of JetbrainsQuotaResponse
+// Clone returns a deep copy of JetbrainsQuotaResponse.
 func (q *JetbrainsQuotaResponse) Clone() *JetbrainsQuotaResponse {
 	if q == nil {
 		return nil
@@ -51,7 +51,7 @@ func (q *JetbrainsQuotaResponse) Clone() *JetbrainsQuotaResponse {
 	}
 }
 
-// Data structures
+// RequestStats holds aggregated request statistics for monitoring.
 type RequestStats struct {
 	TotalRequests      int64           `json:"total_requests"`
 	SuccessfulRequests int64           `json:"successful_requests"`
@@ -61,6 +61,7 @@ type RequestStats struct {
 	RequestHistory     []RequestRecord `json:"request_history"`
 }
 
+// RequestRecord represents a single request's metadata for history tracking.
 type RequestRecord struct {
 	Timestamp    time.Time `json:"timestamp"`
 	Success      bool      `json:"success"`
@@ -69,6 +70,7 @@ type RequestRecord struct {
 	Account      string    `json:"account"`
 }
 
+// PeriodStats holds computed statistics for a time period.
 type PeriodStats struct {
 	Requests        int64   `json:"requests"`
 	SuccessRate     float64 `json:"successRate"`
@@ -76,6 +78,7 @@ type PeriodStats struct {
 	QPS             float64 `json:"qps"`
 }
 
+// TokenInfo holds account token and quota information for the monitoring panel.
 type TokenInfo struct {
 	Name       string    `json:"name"`
 	License    string    `json:"license"`
@@ -87,6 +90,7 @@ type TokenInfo struct {
 	HasQuota   bool      `json:"has_quota"`
 }
 
+// JetbrainsAccount represents a JetBrains API account with JWT credentials.
 type JetbrainsAccount struct {
 	LicenseID      string     `json:"licenseId,omitempty"`
 	Authorization  string     `json:"authorization,omitempty"`
@@ -98,6 +102,7 @@ type JetbrainsAccount struct {
 	Mu             sync.Mutex `json:"-"` // account-level mutex for JWT refresh and quota check
 }
 
+// ModelInfo represents a single model entry in the models list.
 type ModelInfo struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -105,19 +110,23 @@ type ModelInfo struct {
 	OwnedBy string `json:"owned_by"`
 }
 
+// ModelsData holds a list of available models.
 type ModelsData struct {
 	Data []ModelInfo `json:"data"`
 }
 
+// ModelList is the OpenAI-compatible model list response.
 type ModelList struct {
 	Object string      `json:"object"`
 	Data   []ModelInfo `json:"data"`
 }
 
+// ModelsConfig holds the model ID mapping configuration from models.json.
 type ModelsConfig struct {
 	Models map[string]string `json:"models"`
 }
 
+// ChatMessage represents a single message in an OpenAI chat completion request.
 type ChatMessage struct {
 	Role       string     `json:"role"`
 	Content    any        `json:"content,omitempty"`
@@ -125,17 +134,20 @@ type ChatMessage struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
+// ToolCall represents a tool invocation within a chat message.
 type ToolCall struct {
 	ID       string   `json:"id"`
 	Type     string   `json:"type"`
 	Function Function `json:"function"`
 }
 
+// Function holds the function name and arguments for a tool call.
 type Function struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
+// ChatCompletionRequest is the OpenAI-compatible chat completion request payload.
 type ChatCompletionRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
@@ -149,34 +161,39 @@ type ChatCompletionRequest struct {
 	ServiceTier string        `json:"service_tier,omitempty"`
 }
 
+// Tool represents a tool definition in an OpenAI chat completion request.
 type Tool struct {
 	Type     string       `json:"type"`
 	Function ToolFunction `json:"function"`
 }
 
+// ToolFunction holds the function schema for a tool definition.
 type ToolFunction struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters"`
 }
 
-// JetBrains tool format
+// JetbrainsToolDefinition is the JetBrains-specific tool definition format.
 type JetbrainsToolDefinition struct {
 	Name        string                         `json:"name"`
 	Description string                         `json:"description,omitempty"`
 	Parameters  JetbrainsToolParametersWrapper `json:"parameters"`
 }
 
+// JetbrainsToolParametersWrapper wraps tool parameter schemas in JetBrains format.
 type JetbrainsToolParametersWrapper struct {
 	Schema map[string]any `json:"schema"`
 }
 
+// ChatCompletionChoice represents a single choice in an OpenAI chat completion response.
 type ChatCompletionChoice struct {
 	Message      ChatMessage `json:"message"`
 	Index        int         `json:"index"`
 	FinishReason string      `json:"finish_reason"`
 }
 
+// ChatCompletionResponse is the OpenAI-compatible non-streaming chat completion response.
 type ChatCompletionResponse struct {
 	ID      string                 `json:"id"`
 	Object  string                 `json:"object"`
@@ -186,12 +203,14 @@ type ChatCompletionResponse struct {
 	Usage   map[string]int         `json:"usage"`
 }
 
+// StreamChoice represents a single choice in an OpenAI streaming response chunk.
 type StreamChoice struct {
 	Delta        map[string]any `json:"delta"`
 	Index        int            `json:"index"`
 	FinishReason *string        `json:"finish_reason"`
 }
 
+// StreamResponse is the OpenAI-compatible streaming response chunk.
 type StreamResponse struct {
 	ID      string         `json:"id"`
 	Object  string         `json:"object"`
@@ -200,7 +219,7 @@ type StreamResponse struct {
 	Choices []StreamChoice `json:"choices"`
 }
 
-// JetbrainsMessage updated to support v8 API format including tool calls
+// JetbrainsMessage represents a message in the JetBrains v8 API format including tool calls.
 type JetbrainsMessage struct {
 	Type      string `json:"type"`
 	Content   string `json:"content,omitempty"`
@@ -211,6 +230,7 @@ type JetbrainsMessage struct {
 	Result    string `json:"result,omitempty"`
 }
 
+// JetbrainsPayload is the top-level request payload sent to JetBrains API.
 type JetbrainsPayload struct {
 	Prompt     string               `json:"prompt"`
 	Profile    string               `json:"profile"`
@@ -218,14 +238,17 @@ type JetbrainsPayload struct {
 	Parameters *JetbrainsParameters `json:"parameters,omitempty"`
 }
 
+// JetbrainsChat holds the message history in a JetBrains API request.
 type JetbrainsChat struct {
 	Messages []JetbrainsMessage `json:"messages"`
 }
 
+// JetbrainsParameters holds tool definitions for JetBrains API requests.
 type JetbrainsParameters struct {
 	Data []JetbrainsData `json:"data"`
 }
 
+// JetbrainsData represents a single parameter entry in JetBrains API requests.
 type JetbrainsData struct {
 	Type     string `json:"type"`
 	FQDN     string `json:"fqdn,omitempty"`
@@ -233,24 +256,25 @@ type JetbrainsData struct {
 	Modified int64  `json:"modified,omitempty"`
 }
 
-// Anthropic Messages API data structures
+// AnthropicMessage represents a message in the Anthropic Messages API format.
 type AnthropicMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
 }
 
+// AnthropicContentBlock represents a content block in an Anthropic message.
 type AnthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type  string         `json:"type"`
+	Text  string         `json:"text,omitempty"`
+	ID    string         `json:"id,omitempty"`
+	Name  string         `json:"name,omitempty"`
 	Input map[string]any `json:"input,omitempty"`
 }
 
-// FlexibleString supports string or array form of system field
+// FlexibleString supports string or array form of system field.
 type FlexibleString string
 
-// UnmarshalJSON custom JSON parsing, supports string and array formats
+// UnmarshalJSON custom JSON parsing, supports string and array formats.
 func (fs *FlexibleString) UnmarshalJSON(data []byte) error {
 	var str string
 	if err := sonic.Unmarshal(data, &str); err == nil {
@@ -281,12 +305,14 @@ func (fs *FlexibleString) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("invalid system field format")
 }
 
+// AnthropicTool represents a tool definition in the Anthropic Messages API.
 type AnthropicTool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+// AnthropicMessagesRequest is the Anthropic Messages API request payload.
 type AnthropicMessagesRequest struct {
 	Model         string             `json:"model"`
 	MaxTokens     int                `json:"max_tokens"`
@@ -301,11 +327,13 @@ type AnthropicMessagesRequest struct {
 	ToolChoice    any                `json:"tool_choice,omitempty"`
 }
 
+// AnthropicUsage holds token usage information for Anthropic API responses.
 type AnthropicUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 }
 
+// AnthropicMessagesResponse is the Anthropic Messages API non-streaming response.
 type AnthropicMessagesResponse struct {
 	ID           string                  `json:"id"`
 	Type         string                  `json:"type"`
@@ -317,7 +345,7 @@ type AnthropicMessagesResponse struct {
 	Usage        AnthropicUsage          `json:"usage"`
 }
 
-// Streaming response structure
+// AnthropicStreamResponse is the Anthropic Messages API streaming response event.
 type AnthropicStreamResponse struct {
 	Type         string                 `json:"type"`
 	Index        *int                   `json:"index,omitempty"`
@@ -330,7 +358,7 @@ type AnthropicStreamResponse struct {
 	Usage   *AnthropicUsage            `json:"usage,omitempty"`
 }
 
-// ToolInfo holds tool information
+// ToolInfo holds tool information.
 type ToolInfo struct {
 	ID     string
 	Name   string

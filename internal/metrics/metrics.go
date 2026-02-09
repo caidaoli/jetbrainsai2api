@@ -14,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// StatsPageHTML holds the embedded monitoring dashboard HTML.
+//
 //go:embed static/index.html
 var StatsPageHTML embed.FS
 

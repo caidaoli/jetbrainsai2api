@@ -20,6 +20,7 @@ type FileStorage struct {
 	filePath string
 }
 
+// NewFileStorage creates a new file-based storage instance.
 func NewFileStorage(filePath string) *FileStorage {
 	if filePath == "" {
 		filePath = core.StatsFilePath
@@ -27,6 +28,7 @@ func NewFileStorage(filePath string) *FileStorage {
 	return &FileStorage{filePath: filePath}
 }
 
+// SaveStats persists request statistics to the JSON file.
 func (fs *FileStorage) SaveStats(stats *core.RequestStats) error {
 	data, err := sonic.MarshalIndent(stats, "", "  ")
 	if err != nil {
@@ -35,6 +37,7 @@ func (fs *FileStorage) SaveStats(stats *core.RequestStats) error {
 	return os.WriteFile(fs.filePath, data, core.FilePermissionReadWrite)
 }
 
+// LoadStats reads request statistics from the JSON file.
 func (fs *FileStorage) LoadStats() (*core.RequestStats, error) {
 	data, err := os.ReadFile(fs.filePath)
 	if err != nil {
@@ -56,6 +59,7 @@ func (fs *FileStorage) LoadStats() (*core.RequestStats, error) {
 	return &stats, nil
 }
 
+// Close is a no-op for file storage (no resources to release).
 func (fs *FileStorage) Close() error {
 	return nil
 }
@@ -73,6 +77,7 @@ type RedisStorageConfig struct {
 	Key string
 }
 
+// NewRedisStorage creates a new Redis-based storage instance.
 func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 	opts, err := redis.ParseURL(config.URL)
 	if err != nil {
@@ -96,6 +101,7 @@ func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 	return &RedisStorage{client: client, ctx: ctx, key: key}, nil
 }
 
+// SaveStats persists request statistics to Redis.
 func (rs *RedisStorage) SaveStats(stats *core.RequestStats) error {
 	data, err := util.MarshalJSON(stats)
 	if err != nil {
@@ -104,6 +110,7 @@ func (rs *RedisStorage) SaveStats(stats *core.RequestStats) error {
 	return rs.client.Set(rs.ctx, rs.key, data, 0).Err()
 }
 
+// LoadStats reads request statistics from Redis.
 func (rs *RedisStorage) LoadStats() (*core.RequestStats, error) {
 	val, err := rs.client.Get(rs.ctx, rs.key).Result()
 	if err != nil {
@@ -125,6 +132,7 @@ func (rs *RedisStorage) LoadStats() (*core.RequestStats, error) {
 	return &stats, nil
 }
 
+// Close closes the Redis connection.
 func (rs *RedisStorage) Close() error {
 	return rs.client.Close()
 }
