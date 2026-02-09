@@ -36,7 +36,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -a -installsuffix cgo \
     -ldflags='-w -s -extldflags "-static"' \
-    -o jetbrainsai2api .
+    -o jetbrainsai2api ./cmd/server
 
 # 使用更安全的 distroless 镜像作为运行时基础
 FROM gcr.io/distroless/static:nonroot
