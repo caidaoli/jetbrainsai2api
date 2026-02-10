@@ -81,8 +81,8 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	streamID := core.ResponseIDPrefix + uuid.New().String()
 	created := time.Now().Unix()
 	firstChunkSent := false
-	var currentTool *map[string]any
-	var toolCalls []map[string]any
+	var currentTool map[string]any
+	var toolCalls []any
 	streamFinished := false
 
 	finalizeCurrentTool := func() {
@@ -90,7 +90,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			return
 		}
 
-		if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
+		if funcMap, ok := currentTool["function"].(map[string]any); ok {
 			if args, ok := funcMap["arguments"].(string); ok && args != "" {
 				var argsTest map[string]any
 				if err := sonic.Unmarshal([]byte(args), &argsTest); err != nil {
@@ -99,7 +99,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			}
 		}
 
-		toolCalls = append(toolCalls, *currentTool)
+		toolCalls = append(toolCalls, currentTool)
 		currentTool = nil
 	}
 
@@ -115,16 +115,16 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				return true
 			}
 
-			var deltaPayload map[string]any
+			var delta core.StreamDelta
 			if !firstChunkSent {
-				deltaPayload = map[string]any{
-					"role":    core.RoleAssistant,
-					"content": content,
+				delta = core.StreamDelta{
+					Role:    core.RoleAssistant,
+					Content: &content,
 				}
 				firstChunkSent = true
 			} else {
-				deltaPayload = map[string]any{
-					"content": content,
+				delta = core.StreamDelta{
+					Content: &content,
 				}
 			}
 
@@ -133,7 +133,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				Object:  core.ChatCompletionChunkObjectType,
 				Created: created,
 				Model:   request.Model,
-				Choices: []core.StreamChoice{{Delta: deltaPayload}},
+				Choices: []core.StreamChoice{{Delta: delta}},
 			}
 
 			respJSON, err := util.MarshalJSON(streamResp)
@@ -148,7 +148,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				finalizeCurrentTool()
 
 				if name, ok := data["name"].(string); ok && name != "" {
-					currentTool = &map[string]any{
+					currentTool = map[string]any{
 						"index": len(toolCalls),
 						"id":    upstreamID,
 						"function": map[string]any{
@@ -161,7 +161,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				}
 			} else if currentTool != nil {
 				if content, ok := data["content"].(string); ok {
-					if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
+					if funcMap, ok := currentTool["function"].(map[string]any); ok {
 						currentArgs, _ := funcMap["arguments"].(string)
 						funcMap["arguments"] = currentArgs + content
 					}
@@ -181,7 +181,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			if funcName != "" {
 				finalizeCurrentTool()
 
-				currentTool = &map[string]any{
+				currentTool = map[string]any{
 					"index": len(toolCalls),
 					"id":    util.GenerateRandomID(core.ToolCallIDPrefix),
 					"function": map[string]any{
@@ -191,7 +191,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 					"type": core.ToolTypeFunction,
 				}
 			} else if currentTool != nil {
-				if funcMap, ok := (*currentTool)["function"].(map[string]any); ok {
+				if funcMap, ok := currentTool["function"].(map[string]any); ok {
 					currentArgs, _ := funcMap["arguments"].(string)
 					funcMap["arguments"] = currentArgs + funcArgs
 				}
@@ -207,11 +207,11 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			}
 
 			if len(toolCalls) > 0 {
-				deltaPayload := map[string]any{
-					"tool_calls": toolCalls,
+				delta := core.StreamDelta{
+					ToolCalls: toolCalls,
 				}
 				if !firstChunkSent {
-					deltaPayload["role"] = core.RoleAssistant
+					delta.Role = core.RoleAssistant
 					firstChunkSent = true
 				}
 				streamResp := core.StreamResponse{
@@ -219,7 +219,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 					Object:  core.ChatCompletionChunkObjectType,
 					Created: time.Now().Unix(),
 					Model:   request.Model,
-					Choices: []core.StreamChoice{{Delta: deltaPayload}},
+					Choices: []core.StreamChoice{{Delta: delta}},
 				}
 				respJSON, err := util.MarshalJSON(streamResp)
 				if err != nil {
@@ -235,7 +235,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				Object:  core.ChatCompletionChunkObjectType,
 				Created: time.Now().Unix(),
 				Model:   request.Model,
-				Choices: []core.StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(finishReason)}},
+				Choices: []core.StreamChoice{{Delta: core.StreamDelta{}, FinishReason: stringPtr(finishReason)}},
 			}
 
 			respJSON, err := util.MarshalJSON(finalResp)
@@ -264,11 +264,11 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 		finalizeCurrentTool()
 
 		if len(toolCalls) > 0 {
-			deltaPayload := map[string]any{
-				"tool_calls": toolCalls,
+			delta := core.StreamDelta{
+				ToolCalls: toolCalls,
 			}
 			if !firstChunkSent {
-				deltaPayload["role"] = core.RoleAssistant
+				delta.Role = core.RoleAssistant
 				firstChunkSent = true
 			}
 			streamResp := core.StreamResponse{
@@ -276,7 +276,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				Object:  core.ChatCompletionChunkObjectType,
 				Created: time.Now().Unix(),
 				Model:   request.Model,
-				Choices: []core.StreamChoice{{Delta: deltaPayload}},
+				Choices: []core.StreamChoice{{Delta: delta}},
 			}
 			respJSON, marshalErr := util.MarshalJSON(streamResp)
 			if marshalErr != nil {
@@ -295,7 +295,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 			Object:  core.ChatCompletionChunkObjectType,
 			Created: time.Now().Unix(),
 			Model:   request.Model,
-			Choices: []core.StreamChoice{{Delta: map[string]any{}, FinishReason: stringPtr(finishReason)}},
+			Choices: []core.StreamChoice{{Delta: core.StreamDelta{}, FinishReason: stringPtr(finishReason)}},
 		}
 		respJSON, marshalErr := util.MarshalJSON(finalResp)
 		if marshalErr != nil {
@@ -307,7 +307,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 		c.Writer.Flush()
 	}
 
-	m.RecordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
+	m.RecordRequest(err == nil, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
 }
 
 func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request core.ChatCompletionRequest, startTime time.Time, accountIdentifier string, m *metrics.MetricsService, logger core.Logger) {
@@ -442,14 +442,9 @@ func handleNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, 
 			Index:        0,
 			FinishReason: finishReason,
 		}},
-		Usage: map[string]int{
-			"prompt_tokens":     0,
-			"completion_tokens": 0,
-			"total_tokens":      0,
-		},
 	}
 
-	m.RecordRequest(true, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
+	m.RecordRequest(err == nil, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
 	c.JSON(http.StatusOK, response)
 }
 

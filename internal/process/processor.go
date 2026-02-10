@@ -87,7 +87,10 @@ func (p *RequestProcessor) ProcessTools(request *core.ChatCompletionRequest) Pro
 	if cachedAny, found := p.cache.Get(toolsCacheKey); found {
 		if validatedTools, ok := cachedAny.([]core.Tool); ok {
 			p.metrics.RecordCacheHit()
-			data := p.buildToolsData(validatedTools)
+			data, err := p.buildToolsData(validatedTools)
+			if err != nil {
+				return ProcessToolsResult{Error: err}
+			}
 			return ProcessToolsResult{
 				Data:          data,
 				ValidatedDone: true,
@@ -110,7 +113,10 @@ func (p *RequestProcessor) ProcessTools(request *core.ChatCompletionRequest) Pro
 
 	p.cache.Set(toolsCacheKey, validatedTools, core.ToolsValidationCacheTTL)
 
-	data := p.buildToolsData(validatedTools)
+	data, err := p.buildToolsData(validatedTools)
+	if err != nil {
+		return ProcessToolsResult{Error: fmt.Errorf("failed to build tools data: %w", err)}
+	}
 
 	return ProcessToolsResult{
 		Data:          data,
@@ -118,13 +124,9 @@ func (p *RequestProcessor) ProcessTools(request *core.ChatCompletionRequest) Pro
 	}
 }
 
-func (p *RequestProcessor) buildToolsData(validatedTools []core.Tool) []core.JetbrainsData {
+func (p *RequestProcessor) buildToolsData(validatedTools []core.Tool) ([]core.JetbrainsData, error) {
 	if len(validatedTools) == 0 {
-		return []core.JetbrainsData{}
-	}
-
-	data := []core.JetbrainsData{
-		{Type: "json", FQDN: "llm.parameters.tools"},
+		return []core.JetbrainsData{}, nil
 	}
 
 	var jetbrainsTools []core.JetbrainsToolDefinition
@@ -140,29 +142,50 @@ func (p *RequestProcessor) buildToolsData(validatedTools []core.Tool) []core.Jet
 
 	toolsJSON, err := util.MarshalJSON(jetbrainsTools)
 	if err != nil {
-		p.logger.Warn("Failed to marshal tools: %v", err)
-		return data
+		return nil, fmt.Errorf("failed to marshal tools: %w", err)
 	}
 
 	p.logger.Debug("Transformed tools for JetBrains API: %s", string(toolsJSON))
 
 	modifiedTime := time.Now().UnixMilli()
-	data = append(data, core.JetbrainsData{
-		Type:     "json",
-		Value:    string(toolsJSON),
-		Modified: modifiedTime,
-	})
+	data := []core.JetbrainsData{
+		{Type: "json", FQDN: "llm.parameters.tools"},
+		{
+			Type:     "json",
+			Value:    string(toolsJSON),
+			Modified: modifiedTime,
+		},
+	}
 
-	return data
+	return data, nil
 }
 
-// BuildJetbrainsPayload builds JetBrains API payload
+// BuildJetbrainsPayload builds JetBrains API payload from an OpenAI request
 func (p *RequestProcessor) BuildJetbrainsPayload(
 	request *core.ChatCompletionRequest,
 	messages []core.JetbrainsMessage,
 	data []core.JetbrainsData,
 ) ([]byte, error) {
-	internalModel := GetInternalModelName(p.modelsConfig, request.Model)
+	return p.buildPayload(request.Model, messages, data, len(request.Tools))
+}
+
+// BuildPayloadDirect builds JetBrains API payload from pre-converted messages and data.
+// Used by the Anthropic path where messages/tools are already in JetBrains format.
+func (p *RequestProcessor) BuildPayloadDirect(
+	model string,
+	messages []core.JetbrainsMessage,
+	data []core.JetbrainsData,
+) ([]byte, error) {
+	return p.buildPayload(model, messages, data, len(data)/2)
+}
+
+func (p *RequestProcessor) buildPayload(
+	model string,
+	messages []core.JetbrainsMessage,
+	data []core.JetbrainsData,
+	toolCount int,
+) ([]byte, error) {
+	internalModel := GetInternalModelName(p.modelsConfig, model)
 
 	payload := core.JetbrainsPayload{
 		Prompt:  core.JetBrainsChatPrompt,
@@ -179,14 +202,8 @@ func (p *RequestProcessor) BuildJetbrainsPayload(
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	p.logger.Debug("=== JetBrains API Request Debug ===")
-	p.logger.Debug("Model: %s -> %s", request.Model, internalModel)
-	p.logger.Debug("Messages processed: %d", len(messages))
-	p.logger.Debug("Tools processed: %d", len(request.Tools))
-	p.logger.Debug("Payload size: %d bytes", len(payloadBytes))
-	p.logger.Debug("=== Complete Upstream Payload ===")
-	p.logger.Debug("%s", string(payloadBytes))
-	p.logger.Debug("=== End Upstream Payload ===")
+	p.logger.Debug("JetBrains payload: model=%s->%s, messages=%d, tools=%d, size=%d",
+		model, internalModel, len(messages), toolCount, len(payloadBytes))
 
 	return payloadBytes, nil
 }

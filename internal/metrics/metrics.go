@@ -103,7 +103,9 @@ func (ms *MetricsService) flushBuffer() {
 // RecordRequest records a request result
 func (ms *MetricsService) RecordRequest(success bool, responseTime int64, model string, account string) {
 	now := time.Now()
+	ms.historyMu.Lock()
 	ms.lastRequestTime = now
+	ms.historyMu.Unlock()
 	ms.atomicStats.TotalRequests.Add(1)
 	ms.atomicStats.TotalResponseTime.Add(responseTime)
 
@@ -116,8 +118,14 @@ func (ms *MetricsService) RecordRequest(success bool, responseTime int64, model 
 	ms.recentMu.Lock()
 	ms.recentRequests = append(ms.recentRequests, now)
 	cutoff := now.Add(-1 * time.Minute)
-	for len(ms.recentRequests) > 0 && ms.recentRequests[0].Before(cutoff) {
-		ms.recentRequests = ms.recentRequests[1:]
+	startIdx := 0
+	for startIdx < len(ms.recentRequests) && ms.recentRequests[startIdx].Before(cutoff) {
+		startIdx++
+	}
+	if startIdx > 0 {
+		newRecent := make([]time.Time, len(ms.recentRequests)-startIdx)
+		copy(newRecent, ms.recentRequests[startIdx:])
+		ms.recentRequests = newRecent
 	}
 	ms.recentMu.Unlock()
 
@@ -173,8 +181,14 @@ func (ms *MetricsService) GetQPS() float64 {
 
 	now := time.Now()
 	cutoff := now.Add(-1 * time.Minute)
-	for len(ms.recentRequests) > 0 && ms.recentRequests[0].Before(cutoff) {
-		ms.recentRequests = ms.recentRequests[1:]
+	startIdx := 0
+	for startIdx < len(ms.recentRequests) && ms.recentRequests[startIdx].Before(cutoff) {
+		startIdx++
+	}
+	if startIdx > 0 {
+		newRecent := make([]time.Time, len(ms.recentRequests)-startIdx)
+		copy(newRecent, ms.recentRequests[startIdx:])
+		ms.recentRequests = newRecent
 	}
 
 	if len(ms.recentRequests) == 0 {
@@ -190,14 +204,60 @@ func (ms *MetricsService) GetRequestStats() core.RequestStats {
 	ms.historyMu.RLock()
 	defer ms.historyMu.RUnlock()
 
+	historyCopy := make([]core.RequestRecord, len(ms.requestHistory))
+	copy(historyCopy, ms.requestHistory)
+
 	return core.RequestStats{
 		TotalRequests:      ms.atomicStats.TotalRequests.Load(),
 		SuccessfulRequests: ms.atomicStats.SuccessfulRequests.Load(),
 		FailedRequests:     ms.atomicStats.FailedRequests.Load(),
 		TotalResponseTime:  ms.atomicStats.TotalResponseTime.Load(),
 		LastRequestTime:    ms.lastRequestTime,
-		RequestHistory:     ms.requestHistory,
+		RequestHistory:     historyCopy,
 	}
+}
+
+// GetPeriodStats computes period statistics for multiple hour windows in a single pass.
+func GetPeriodStats(history []core.RequestRecord, hourPeriods ...int) map[int]core.PeriodStats {
+	if len(hourPeriods) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	cutoffs := make([]time.Time, len(hourPeriods))
+	requests := make([]int64, len(hourPeriods))
+	successful := make([]int64, len(hourPeriods))
+	responseTime := make([]int64, len(hourPeriods))
+
+	for i, hours := range hourPeriods {
+		cutoffs[i] = now.Add(-time.Duration(hours) * time.Hour)
+	}
+
+	for _, record := range history {
+		for i, cutoff := range cutoffs {
+			if record.Timestamp.After(cutoff) {
+				requests[i]++
+				responseTime[i] += record.ResponseTime
+				if record.Success {
+					successful[i]++
+				}
+			}
+		}
+	}
+
+	result := make(map[int]core.PeriodStats, len(hourPeriods))
+	for i, hours := range hourPeriods {
+		stats := core.PeriodStats{
+			Requests: requests[i],
+			QPS:      float64(requests[i]) / (float64(hours) * 3600.0),
+		}
+		if requests[i] > 0 {
+			stats.SuccessRate = float64(successful[i]) / float64(requests[i]) * 100
+			stats.AvgResponseTime = responseTime[i] / requests[i]
+		}
+		result[hours] = stats
+	}
+	return result
 }
 
 // LoadStats loads stats from storage
@@ -226,10 +286,13 @@ func (ms *MetricsService) LoadStats() error {
 // SaveStatsDebounced saves stats with debounce
 func (ms *MetricsService) SaveStatsDebounced() {
 	now := time.Now()
+	ms.historyMu.Lock()
 	if now.Sub(ms.lastSaveTime) < ms.minSaveInterval {
+		ms.historyMu.Unlock()
 		return
 	}
 	ms.lastSaveTime = now
+	ms.historyMu.Unlock()
 
 	if ms.storage == nil {
 		return

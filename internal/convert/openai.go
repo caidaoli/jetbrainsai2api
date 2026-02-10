@@ -157,6 +157,16 @@ func (c *MessageConverter) convertSystemMessage(msg core.ChatMessage) []core.Jet
 func (c *MessageConverter) convertAssistantMessage(msg core.ChatMessage) []core.JetbrainsMessage {
 	if len(msg.ToolCalls) > 0 {
 		var result []core.JetbrainsMessage
+
+		// If both text content and tool calls exist, preserve text first
+		textContent := util.ExtractTextContent(msg.Content)
+		if textContent != "" {
+			result = append(result, core.JetbrainsMessage{
+				Type:    core.JetBrainsMessageTypeAssistantText,
+				Content: textContent,
+			})
+		}
+
 		for _, toolCall := range msg.ToolCalls {
 			result = append(result, c.convertAssistantToolCall(toolCall)...)
 		}
@@ -190,8 +200,8 @@ func (c *MessageConverter) convertAssistantToolCall(toolCall core.ToolCall) []co
 func (c *MessageConverter) convertToolMessage(msg core.ChatMessage) []core.JetbrainsMessage {
 	functionName := c.toolIDToFuncNameMap[msg.ToolCallID]
 	if functionName == "" {
-		c.logger.Warn("Cannot find function name for tool_call_id %s", msg.ToolCallID)
-		return nil
+		c.logger.Warn("Cannot find function name for tool_call_id %s, using fallback", msg.ToolCallID)
+		functionName = "unknown_tool"
 	}
 
 	textContent := util.ExtractTextContent(msg.Content)

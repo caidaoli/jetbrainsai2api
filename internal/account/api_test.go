@@ -213,20 +213,9 @@ func TestProcessQuotaData(t *testing.T) {
 		{
 			name: "正常配额-有剩余",
 			quotaData: &core.JetbrainsQuotaResponse{
-				Current: struct {
-					Current struct {
-						Amount string `json:"amount"`
-					} `json:"current"`
-					Maximum struct {
-						Amount string `json:"amount"`
-					} `json:"maximum"`
-				}{
-					Current: struct {
-						Amount string `json:"amount"`
-					}{Amount: "50.5"},
-					Maximum: struct {
-						Amount string `json:"amount"`
-					}{Amount: "100.0"},
+				Current: core.QuotaUsage{
+					Current: core.QuotaAmount{Amount: "50.5"},
+					Maximum: core.QuotaAmount{Amount: "100.0"},
 				},
 				Until: "2025-12-15T00:00:00Z",
 			},
@@ -240,20 +229,9 @@ func TestProcessQuotaData(t *testing.T) {
 		{
 			name: "配额耗尽-相等",
 			quotaData: &core.JetbrainsQuotaResponse{
-				Current: struct {
-					Current struct {
-						Amount string `json:"amount"`
-					} `json:"current"`
-					Maximum struct {
-						Amount string `json:"amount"`
-					} `json:"maximum"`
-				}{
-					Current: struct {
-						Amount string `json:"amount"`
-					}{Amount: "100.0"},
-					Maximum: struct {
-						Amount string `json:"amount"`
-					}{Amount: "100.0"},
+				Current: core.QuotaUsage{
+					Current: core.QuotaAmount{Amount: "100.0"},
+					Maximum: core.QuotaAmount{Amount: "100.0"},
 				},
 				Until: "2025-12-15T00:00:00Z",
 			},
@@ -267,20 +245,9 @@ func TestProcessQuotaData(t *testing.T) {
 		{
 			name: "边界值-零使用量",
 			quotaData: &core.JetbrainsQuotaResponse{
-				Current: struct {
-					Current struct {
-						Amount string `json:"amount"`
-					} `json:"current"`
-					Maximum struct {
-						Amount string `json:"amount"`
-					} `json:"maximum"`
-				}{
-					Current: struct {
-						Amount string `json:"amount"`
-					}{Amount: "0"},
-					Maximum: struct {
-						Amount string `json:"amount"`
-					}{Amount: "100.0"},
+				Current: core.QuotaUsage{
+					Current: core.QuotaAmount{Amount: "0"},
+					Maximum: core.QuotaAmount{Amount: "100.0"},
 				},
 				Until: "2025-12-15T00:00:00Z",
 			},
@@ -323,20 +290,9 @@ func TestProcessQuotaData_ConcurrentAccess(t *testing.T) {
 	}
 
 	quotaData := &core.JetbrainsQuotaResponse{
-		Current: struct {
-			Current struct {
-				Amount string `json:"amount"`
-			} `json:"current"`
-			Maximum struct {
-				Amount string `json:"amount"`
-			} `json:"maximum"`
-		}{
-			Current: struct {
-				Amount string `json:"amount"`
-			}{Amount: "50.0"},
-			Maximum: struct {
-				Amount string `json:"amount"`
-			}{Amount: "100.0"},
+		Current: core.QuotaUsage{
+			Current: core.QuotaAmount{Amount: "50.0"},
+			Maximum: core.QuotaAmount{Amount: "100.0"},
 		},
 		Until: "2025-12-15T00:00:00Z",
 	}

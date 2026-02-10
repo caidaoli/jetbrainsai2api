@@ -117,7 +117,7 @@ func BenchmarkJSONMarshal(b *testing.B) {
 		Choices: []core.ChatCompletionChoice{
 			{Index: 0, Message: core.ChatMessage{Role: core.RoleAssistant, Content: "Hello!"}, FinishReason: core.FinishReasonStop},
 		},
-		Usage: map[string]int{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+		Usage: core.OpenAIUsage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

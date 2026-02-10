@@ -23,6 +23,12 @@ func (v *ImageValidator) ValidateImageData(mediaType, data string) error {
 			mediaType, core.SupportedImageFormats)
 	}
 
+	// Pre-check base64 string length to avoid OOM from decoding huge data
+	estimatedSize := int64(len(data)) * 3 / 4
+	if estimatedSize > core.MaxImageSizeBytes {
+		return fmt.Errorf("image data too large: estimated %d bytes exceeds %d limit", estimatedSize, core.MaxImageSizeBytes)
+	}
+
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		return fmt.Errorf("invalid base64 data: %v", err)
@@ -45,7 +51,8 @@ func (v *ImageValidator) isFormatSupported(mediaType string) bool {
 	return false
 }
 
-// ExtractImageDataFromContent extracts image data from OpenAI content format
+// ExtractImageDataFromContent extracts the first image data from OpenAI content format.
+// NOTE: Only the first image is extracted; subsequent images in the content array are ignored.
 func ExtractImageDataFromContent(content any) (mediaType, data string, hasImage bool) {
 	if content == nil {
 		return "", "", false

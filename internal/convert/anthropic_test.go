@@ -248,12 +248,12 @@ func TestExtractStringContent(t *testing.T) {
 			expected: "Text content",
 		},
 		{
-			name:     "tool_use块返回input的JSON",
+			name:     "tool_use块被跳过",
 			content:  []any{map[string]any{"type": core.ContentBlockTypeToolUse, "id": "toolu_123", "name": "get_weather", "input": map[string]any{"city": "Beijing"}}},
-			expected: `{"city":"Beijing"}`,
+			expected: "",
 		},
 		{name: "nil内容", content: nil, expected: "<nil>"},
-		{name: "空数组", content: []any{}, expected: "[]"},
+		{name: "空数组", content: []any{}, expected: ""},
 	}
 
 	for _, tt := range tests {

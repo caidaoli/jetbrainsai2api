@@ -316,9 +316,9 @@ func TestPooledAccountManager_GetAllAccounts_ConcurrentSnapshot(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 1000; i++ {
 			SetAccountQuotaStatus(&am.accounts[0], i%2 == 0, time.Now())
-			am.accounts[0].Mu.Lock()
+			am.accounts[0].Lock()
 			am.accounts[0].JWT = "test-jwt-updated"
-			am.accounts[0].Mu.Unlock()
+			am.accounts[0].Unlock()
 		}
 	}()
 
@@ -346,6 +346,19 @@ func TestPooledAccountManager_GetAllAccounts_ConcurrentSnapshot(t *testing.T) {
 	}
 }
 
+// nopQuotaCache is a minimal QuotaCache that always returns cache miss.
+type nopQuotaCache struct{}
+
+func (n *nopQuotaCache) GetQuotaCache(string) (*core.JetbrainsQuotaResponse, bool) {
+	return nil, false
+}
+func (n *nopQuotaCache) SetQuotaCache(string, *core.JetbrainsQuotaResponse) {}
+func (n *nopQuotaCache) DeleteQuotaCache(string)                            {}
+func (n *nopQuotaCache) ClearQuotaCache()                                   {}
+func (n *nopQuotaCache) GenerateQuotaCacheKey(jwt string, licenseID string) string {
+	return jwt + ":" + licenseID
+}
+
 // TestPooledAccountManager_CheckQuotaErrorShouldNotMutateState 验证配额检查失败不会污染账户状态
 func TestPooledAccountManager_CheckQuotaErrorShouldNotMutateState(t *testing.T) {
 	accounts := []core.JetbrainsAccount{
@@ -361,6 +374,7 @@ func TestPooledAccountManager_CheckQuotaErrorShouldNotMutateState(t *testing.T) 
 	am, err := NewPooledAccountManager(AccountManagerConfig{
 		Accounts:   accounts,
 		HTTPClient: &http.Client{},
+		Cache:      &nopQuotaCache{},
 	})
 	if err != nil {
 		t.Fatalf("Failed to create account manager: %v", err)

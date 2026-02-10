@@ -19,6 +19,16 @@ type Cache interface {
 	Get(key string) (any, bool)
 	Set(key string, value any, duration time.Duration)
 	Stop()
+	Close() error
+}
+
+// QuotaCache defines the interface for quota-related cache operations.
+type QuotaCache interface {
+	GetQuotaCache(key string) (*JetbrainsQuotaResponse, bool)
+	SetQuotaCache(key string, value *JetbrainsQuotaResponse)
+	DeleteQuotaCache(key string)
+	ClearQuotaCache()
+	GenerateQuotaCacheKey(jwt string, licenseID string) string
 }
 
 // StorageInterface defines the persistence interface for request statistics.
@@ -67,7 +77,8 @@ func (*NopLogger) Warn(format string, args ...any) {}
 // Error is a no-op.
 func (*NopLogger) Error(format string, args ...any) {}
 
-// Fatal is a no-op.
+// Fatal is a no-op implementation. In tests, consider using t.Fatal instead
+// to ensure test failures are properly reported.
 func (*NopLogger) Fatal(format string, args ...any) {}
 
 // NopMetrics is a no-op MetricsCollector implementation for testing.

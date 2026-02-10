@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"jetbrainsai2api/internal/core"
@@ -94,21 +95,7 @@ func (l *AppLogger) Close() error {
 
 // containsPathTraversal checks if path contains path traversal characters.
 func containsPathTraversal(path string) bool {
-	dangerousPatterns := []string{
-		"..", "./", "../", "..\\", ".\\",
-	}
-
-	for _, pattern := range dangerousPatterns {
-		if len(path) >= len(pattern) {
-			for i := 0; i <= len(path)-len(pattern); i++ {
-				if path[i:i+len(pattern)] == pattern {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
+	return strings.Contains(path, "..")
 }
 
 // createDebugFileOutput creates debug file output, falls back gracefully on failure.
@@ -123,12 +110,9 @@ func createDebugFileOutput() (io.Writer, *os.File) {
 		return os.Stdout, nil
 	}
 
-	cleanPath := os.Getenv("DEBUG_FILE")
-	if len(cleanPath) > 0 {
-		if containsPathTraversal(cleanPath) {
-			log.Printf("[WARN] DEBUG_FILE contains path traversal characters, falling back to stdout")
-			return os.Stdout, nil
-		}
+	if containsPathTraversal(debugFile) {
+		log.Printf("[WARN] DEBUG_FILE contains path traversal characters, falling back to stdout")
+		return os.Stdout, nil
 	}
 
 	//nolint:gosec // G304: debugFile from env var, validated by containsPathTraversal

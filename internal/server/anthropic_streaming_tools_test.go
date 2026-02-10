@@ -45,8 +45,11 @@ func TestHandleAnthropicStreamingResponseWithMetrics_ShouldEmitToolUseBlock(t *t
 	if !strings.Contains(body, "\"id\":\"toolu_abc\"") {
 		t.Fatalf("应包含上游 tool call id，实际: %s", body)
 	}
-	if !strings.Contains(body, "\"input\":{\"city\":\"Beijing\"}") {
-		t.Fatalf("工具参数应聚合为完整 JSON，实际: %s", body)
+	if !strings.Contains(body, "\"input_json_delta\"") {
+		t.Fatalf("应通过 input_json_delta 发送工具参数，实际: %s", body)
+	}
+	if !strings.Contains(body, "\"partial_json\":\"{\\\"city\\\":\\\"Beijing\\\"}\"") {
+		t.Fatalf("input_json_delta 应包含完整 JSON 参数，实际: %s", body)
 	}
 	if !strings.Contains(body, "event: message_stop") {
 		t.Fatalf("应包含 message_stop 事件，实际: %s", body)

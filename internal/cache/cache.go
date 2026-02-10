@@ -133,6 +133,18 @@ func (c *LRUCache) moveToFront(item *CacheItem) {
 func (c *LRUCache) remove(item *CacheItem) {
 	item.prev.next = item.next
 	item.next.prev = item.prev
+	item.prev = nil
+	item.next = nil
+}
+
+// Delete removes an item from the cache by key.
+func (c *LRUCache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if item, exists := c.items[key]; exists {
+		c.remove(item)
+		delete(c.items, key)
+	}
 }
 
 func (c *LRUCache) evict() {
@@ -197,19 +209,13 @@ func (cs *CacheService) GetQuotaCache(key string) (*core.JetbrainsQuotaResponse,
 }
 
 // SetQuotaCache stores quota data in the quota-specific cache.
-func (cs *CacheService) SetQuotaCache(key string, value *core.JetbrainsQuotaResponse, duration time.Duration) {
-	cs.quota.Set(key, value.Clone(), duration)
+func (cs *CacheService) SetQuotaCache(key string, value *core.JetbrainsQuotaResponse) {
+	cs.quota.Set(key, value.Clone(), core.QuotaCacheTime)
 }
 
 // DeleteQuotaCache removes quota data from the quota-specific cache.
 func (cs *CacheService) DeleteQuotaCache(key string) {
-	cs.quota.mu.Lock()
-	defer cs.quota.mu.Unlock()
-
-	if item, found := cs.quota.items[key]; found {
-		cs.quota.remove(item)
-		delete(cs.quota.items, key)
-	}
+	cs.quota.Delete(key)
 }
 
 // ClearQuotaCache removes all items from the quota cache.
@@ -268,14 +274,15 @@ func GenerateToolsCacheKey(tools []core.Tool) string {
 	return fmt.Sprintf("tools:%s:%s", core.CacheKeyVersion, hex.EncodeToString(h.Sum(nil)))
 }
 
-// GenerateQuotaCacheKey creates a cache key for quota data
-func GenerateQuotaCacheKey(account *core.JetbrainsAccount) string {
-	cacheKey := account.LicenseID
+// GenerateQuotaCacheKey creates a cache key for quota data.
+// Accepts jwt and licenseID directly to avoid accessing account fields without locks.
+func (cs *CacheService) GenerateQuotaCacheKey(jwt string, licenseID string) string {
+	cacheKey := licenseID
 	if cacheKey == "" {
-		if len(account.JWT) > 8 {
-			cacheKey = account.JWT[:8]
+		if len(jwt) > 8 {
+			cacheKey = jwt[:8]
 		} else {
-			cacheKey = account.JWT
+			cacheKey = jwt
 		}
 	}
 	return fmt.Sprintf("quota:%s:%s", core.CacheKeyVersion, cacheKey)

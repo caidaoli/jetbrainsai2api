@@ -92,7 +92,7 @@ func TestLoadModels(t *testing.T) {
 }
 
 func TestGetModelItem(t *testing.T) {
-	modelsData := core.ModelsData{
+	modelsData := core.ModelList{
 		Data: []core.ModelInfo{
 			{ID: "gpt-4", Object: "model", OwnedBy: "jetbrains-ai"},
 			{ID: "claude-3", Object: "model", OwnedBy: "jetbrains-ai"},

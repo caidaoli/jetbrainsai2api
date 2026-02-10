@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"jetbrainsai2api/internal/cache"
 	"jetbrainsai2api/internal/core"
 	"jetbrainsai2api/internal/util"
 )
@@ -19,7 +18,7 @@ type PooledAccountManager struct {
 	mu         sync.RWMutex
 	httpClient *http.Client
 
-	cache   *cache.CacheService
+	cache   core.QuotaCache
 	logger  core.Logger
 	metrics core.MetricsCollector
 }
@@ -28,7 +27,7 @@ type PooledAccountManager struct {
 type AccountManagerConfig struct {
 	Accounts   []core.JetbrainsAccount
 	HTTPClient *http.Client
-	Cache      *cache.CacheService
+	Cache      core.QuotaCache
 	Logger     core.Logger
 	Metrics    core.MetricsCollector
 }
@@ -143,11 +142,11 @@ func (am *PooledAccountManager) ensureAccountReady(
 	triedAccounts map[*core.JetbrainsAccount]bool,
 	totalAccounts int,
 ) error {
-	account.Mu.Lock()
+	account.Lock()
 	jwt := account.JWT
 	expiryTime := account.ExpiryTime
 	licenseID := account.LicenseID
-	account.Mu.Unlock()
+	account.Unlock()
 	if licenseID != "" {
 		if jwt == "" || time.Now().After(expiryTime.Add(-core.JWTRefreshTime)) {
 			if err := am.RefreshJWT(account); err != nil {
@@ -166,9 +165,9 @@ func (am *PooledAccountManager) ensureAccountReady(
 		return err
 	}
 
-	account.Mu.Lock()
+	account.Lock()
 	hasQuota := account.HasQuota
-	account.Mu.Unlock()
+	account.Unlock()
 	if !hasQuota {
 		am.logger.Warn("Account %s is over quota (tried %d/%d accounts)",
 			util.GetTokenDisplayName(account), len(triedAccounts), totalAccounts)
@@ -205,12 +204,12 @@ func (am *PooledAccountManager) GetAvailableCount() int {
 
 // RefreshJWT refreshes account JWT token
 func (am *PooledAccountManager) RefreshJWT(account *core.JetbrainsAccount) error {
-	account.Mu.Lock()
-	defer account.Mu.Unlock()
-
+	account.Lock()
 	if account.JWT != "" && time.Now().Before(account.ExpiryTime.Add(-core.JWTRefreshTime)) {
+		account.Unlock()
 		return nil
 	}
+	account.Unlock()
 
 	return RefreshJetbrainsJWT(account, am.httpClient, am.logger)
 }
@@ -221,21 +220,12 @@ func (am *PooledAccountManager) CheckQuota(account *core.JetbrainsAccount) error
 }
 
 func (am *PooledAccountManager) checkQuotaInternal(account *core.JetbrainsAccount) error {
-	account.Mu.Lock()
-	lastQuotaCheck := account.LastQuotaCheck
-	account.Mu.Unlock()
-
-	if lastQuotaCheck > 0 {
-		lastCheck := time.Unix(int64(lastQuotaCheck), 0)
-		if time.Since(lastCheck) < core.QuotaCacheTime {
-			return nil
-		}
+	if am.cache == nil {
+		return nil
 	}
-
 	if _, err := GetQuotaData(account, am.httpClient, am.cache, am.logger); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -247,7 +237,7 @@ func (am *PooledAccountManager) GetAllAccounts() []core.JetbrainsAccount {
 	accounts := make([]core.JetbrainsAccount, len(am.accounts))
 	for i := range am.accounts {
 		account := &am.accounts[i]
-		account.Mu.Lock()
+		account.Lock()
 		accounts[i] = core.JetbrainsAccount{
 			LicenseID:      account.LicenseID,
 			Authorization:  account.Authorization,
@@ -257,7 +247,7 @@ func (am *PooledAccountManager) GetAllAccounts() []core.JetbrainsAccount {
 			LastQuotaCheck: account.LastQuotaCheck,
 			ExpiryTime:     account.ExpiryTime,
 		}
-		account.Mu.Unlock()
+		account.Unlock()
 	}
 	return accounts
 }

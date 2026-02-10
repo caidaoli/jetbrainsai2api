@@ -226,7 +226,7 @@ func TestCacheService_QuotaCache(t *testing.T) {
 	quotaResponse.Current.Current.Amount = "100"
 	quotaResponse.Current.Maximum.Amount = "1000"
 	cacheKey := "quota:v1:test-license"
-	service.SetQuotaCache(cacheKey, quotaResponse, 1*time.Hour)
+	service.SetQuotaCache(cacheKey, quotaResponse)
 	result, found := service.GetQuotaCache(cacheKey)
 	if !found {
 		t.Error("配额缓存应该被找到")
@@ -250,7 +250,7 @@ func TestCacheService_QuotaCacheDeepCopy(t *testing.T) {
 	quotaResponse := &core.JetbrainsQuotaResponse{Until: "1000"}
 	quotaResponse.Current.Current.Amount = "100"
 	cacheKey := "quota:v1:test-deep-copy"
-	service.SetQuotaCache(cacheKey, quotaResponse, 1*time.Hour)
+	service.SetQuotaCache(cacheKey, quotaResponse)
 	result1, _ := service.GetQuotaCache(cacheKey)
 	result1.Current.Current.Amount = "modified"
 	result2, _ := service.GetQuotaCache(cacheKey)
@@ -266,7 +266,7 @@ func TestCacheService_ClearQuotaCache(t *testing.T) {
 	quotaResponse := &core.JetbrainsQuotaResponse{Until: "1000"}
 	quotaResponse.Current.Current.Amount = "100"
 	for _, key := range keys {
-		service.SetQuotaCache(key, quotaResponse, 1*time.Hour)
+		service.SetQuotaCache(key, quotaResponse)
 	}
 	service.ClearQuotaCache()
 	for _, key := range keys {
@@ -336,17 +336,20 @@ func TestGenerateToolsCacheKey(t *testing.T) {
 }
 
 func TestGenerateQuotaCacheKey(t *testing.T) {
+	cs := NewCacheService()
+	defer func() { _ = cs.Close() }()
 	tests := []struct {
-		name    string
-		account *core.JetbrainsAccount
+		name      string
+		jwt       string
+		licenseID string
 	}{
-		{"有LicenseID", &core.JetbrainsAccount{LicenseID: "test-license", JWT: "test-jwt"}},
-		{"无LicenseID使用JWT", &core.JetbrainsAccount{JWT: "test-jwt-1234567890"}},
-		{"短JWT", &core.JetbrainsAccount{JWT: "short"}},
+		{"有LicenseID", "test-jwt", "test-license"},
+		{"无LicenseID使用JWT", "test-jwt-1234567890", ""},
+		{"短JWT", "short", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			key := GenerateQuotaCacheKey(tt.account)
+			key := cs.GenerateQuotaCacheKey(tt.jwt, tt.licenseID)
 			if key == "" {
 				t.Error("缓存键不应该为空")
 			}
@@ -463,20 +466,10 @@ func TestGenerateToolsCacheKey_EmptyTools(t *testing.T) {
 }
 
 func TestCacheService_QuotaCache_Expiration(t *testing.T) {
-	service := NewCacheService()
-	defer func() { _ = service.Close() }()
-	quotaResponse := &core.JetbrainsQuotaResponse{Until: "2099-12-31"}
-	quotaResponse.Current.Current.Amount = "100"
-	service.SetQuotaCache("test-key", quotaResponse, 50*time.Millisecond)
-	_, found := service.GetQuotaCache("test-key")
-	if !found {
-		t.Error("配额缓存应该存在")
-	}
-	time.Sleep(100 * time.Millisecond)
-	_, found = service.GetQuotaCache("test-key")
-	if found {
-		t.Error("配额缓存应该已过期")
-	}
+	// SetQuotaCache now uses fixed core.QuotaCacheTime (1 hour) TTL,
+	// so short-duration expiration cannot be tested at CacheService level.
+	// LRU-level TTL expiration is covered by TestLRUCache_Expiration.
+	t.Skip("QuotaCache TTL is now fixed at core.QuotaCacheTime")
 }
 
 func TestTruncateCacheKey(t *testing.T) {

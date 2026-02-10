@@ -15,6 +15,11 @@ func main() {
 	}
 
 	logger := logpkg.CreateLogger()
+	defer func() {
+		if appLog, ok := logger.(*logpkg.AppLogger); ok {
+			_ = appLog.Close()
+		}
+	}()
 	logger.Info("Logger initialized")
 
 	storageInstance, err := storage.InitStorage()
@@ -35,6 +40,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to create server: %v", err)
 	}
+	defer func() { _ = srv.Close() }()
 
 	logger.Info("Starting server on port %s", cfg.Port)
 	if err := srv.Run(); err != nil {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"jetbrainsai2api/internal/cache"
 	"jetbrainsai2api/internal/core"
 	"jetbrainsai2api/internal/log"
 	"jetbrainsai2api/internal/util"
@@ -23,10 +22,10 @@ func SetAccountQuotaStatus(account *core.JetbrainsAccount, hasQuota bool, checke
 		return
 	}
 
-	account.Mu.Lock()
+	account.Lock()
 	account.HasQuota = hasQuota
 	account.LastQuotaCheck = float64(checkedAt.Unix())
-	account.Mu.Unlock()
+	account.Unlock()
 }
 
 // MarkAccountNoQuota marks account as having no quota
@@ -51,7 +50,11 @@ func HandleJWTExpiredAndRetry(req *http.Request, account *core.JetbrainsAccount,
 		return nil, err
 	}
 
-	if resp.StatusCode == core.HTTPStatusUnauthorized && account.LicenseID != "" {
+	account.Lock()
+	licenseID := account.LicenseID
+	account.Unlock()
+
+	if resp.StatusCode == core.HTTPStatusUnauthorized && licenseID != "" {
 		_ = resp.Body.Close()
 		logger.Info("JWT for %s expired, refreshing...", util.GetTokenDisplayName(account))
 
@@ -59,16 +62,27 @@ func HandleJWTExpiredAndRetry(req *http.Request, account *core.JetbrainsAccount,
 			return nil, err
 		}
 
-		req.Header.Set(core.HeaderGrazieAuthJWT, account.JWT)
+		account.Lock()
+		jwt := account.JWT
+		account.Unlock()
+		req.Header.Set(core.HeaderGrazieAuthJWT, jwt)
 		return httpClient.Do(req)
 	}
 
 	return resp, nil
 }
 
-// EnsureValidJWT ensures account has a valid JWT
+// EnsureValidJWT ensures account has a valid JWT, refreshing if empty or expired
 func EnsureValidJWT(account *core.JetbrainsAccount, httpClient *http.Client, logger core.Logger) error {
-	if account.JWT == "" && account.LicenseID != "" {
+	account.Lock()
+	licenseID := account.LicenseID
+	needsRefresh := account.JWT == "" || (!account.ExpiryTime.IsZero() && time.Now().After(account.ExpiryTime))
+	account.Unlock()
+
+	if licenseID == "" {
+		return nil
+	}
+	if needsRefresh {
 		return RefreshJetbrainsJWT(account, httpClient, logger)
 	}
 	return nil
@@ -101,10 +115,15 @@ func ParseJWTExpiry(tokenStr string) (time.Time, error) {
 
 // RefreshJetbrainsJWT refreshes JWT for a JetBrains account
 func RefreshJetbrainsJWT(account *core.JetbrainsAccount, httpClient *http.Client, logger core.Logger) error {
-	logger.Info("Refreshing JWT for licenseId %s...", account.LicenseID)
+	account.Lock()
+	licenseID := account.LicenseID
+	authorization := account.Authorization
+	account.Unlock()
 
-	payload := map[string]string{"licenseId": account.LicenseID}
-	req, err := util.CreateJetbrainsRequest(http.MethodPost, core.JetBrainsJWTEndpoint, payload, account.Authorization)
+	logger.Info("Refreshing JWT for licenseId %s...", licenseID)
+
+	payload := map[string]string{"licenseId": licenseID}
+	req, err := util.CreateJetbrainsRequest(http.MethodPost, core.JetBrainsJWTEndpoint, payload, authorization)
 	if err != nil {
 		return err
 	}
@@ -135,19 +154,23 @@ func RefreshJetbrainsJWT(account *core.JetbrainsAccount, httpClient *http.Client
 			return fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
 		}
 
-		account.JWT = tokenStr
-		account.LastUpdated = float64(time.Now().Unix())
-
+		var expiryTime time.Time
 		token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
 		if err != nil {
 			logger.Warn("could not parse JWT: %v", err)
 		} else if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			if exp, ok := claims["exp"].(float64); ok {
-				account.ExpiryTime = time.Unix(int64(exp), 0)
+				expiryTime = time.Unix(int64(exp), 0)
 			}
 		}
 
-		logger.Info("Successfully refreshed JWT for licenseId %s, expires at %s", account.LicenseID, account.ExpiryTime.Format(time.RFC3339))
+		account.Lock()
+		account.JWT = tokenStr
+		account.LastUpdated = float64(time.Now().Unix())
+		account.ExpiryTime = expiryTime
+		account.Unlock()
+
+		logger.Info("Successfully refreshed JWT for licenseId %s, expires at %s", licenseID, expiryTime.Format(time.RFC3339))
 		return nil
 	}
 
@@ -171,44 +194,54 @@ func ProcessQuotaData(quotaData *core.JetbrainsQuotaResponse, account *core.Jetb
 	}
 }
 
-// GetQuotaData gets quota data (using CacheService)
-func GetQuotaData(account *core.JetbrainsAccount, httpClient *http.Client, cacheService *cache.CacheService, logger core.Logger) (*core.JetbrainsQuotaResponse, error) {
+// GetQuotaData gets quota data (using QuotaCache interface)
+func GetQuotaData(account *core.JetbrainsAccount, httpClient *http.Client, quotaCache core.QuotaCache, logger core.Logger) (*core.JetbrainsQuotaResponse, error) {
 	if err := EnsureValidJWT(account, httpClient, logger); err != nil {
 		return nil, fmt.Errorf("failed to refresh JWT: %w", err)
 	}
 
-	if account.JWT == "" {
+	account.Lock()
+	jwt := account.JWT
+	licenseID := account.LicenseID
+	account.Unlock()
+
+	if jwt == "" {
 		return nil, fmt.Errorf("account has no JWT")
 	}
 
-	cacheKey := cache.GenerateQuotaCacheKey(account)
-
-	if cacheService != nil {
-		if cachedData, found := cacheService.GetQuotaCache(cacheKey); found {
+	if quotaCache != nil {
+		cacheKey := quotaCache.GenerateQuotaCacheKey(jwt, licenseID)
+		if cachedData, found := quotaCache.GetQuotaCache(cacheKey); found {
 			return cachedData, nil
 		}
 	}
 
-	quotaData, err := getQuotaDataDirect(account, httpClient, cacheService, logger)
+	quotaData, err := getQuotaDataDirect(account, httpClient, quotaCache, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	if cacheService != nil {
-		cacheService.SetQuotaCache(cacheKey, quotaData, core.QuotaCacheTime)
+	if quotaCache != nil {
+		cacheKey := quotaCache.GenerateQuotaCacheKey(jwt, licenseID)
+		quotaCache.SetQuotaCache(cacheKey, quotaData)
 	}
 
 	return quotaData, nil
 }
 
-func getQuotaDataDirect(account *core.JetbrainsAccount, httpClient *http.Client, cacheService *cache.CacheService, logger core.Logger) (*core.JetbrainsQuotaResponse, error) {
+func getQuotaDataDirect(account *core.JetbrainsAccount, httpClient *http.Client, quotaCache core.QuotaCache, logger core.Logger) (*core.JetbrainsQuotaResponse, error) {
+	account.Lock()
+	jwt := account.JWT
+	licenseID := account.LicenseID
+	account.Unlock()
+
 	req, err := http.NewRequest(http.MethodPost, core.JetBrainsQuotaEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header.Set("Content-Length", "0")
-	SetJetbrainsHeaders(req, account.JWT)
+	SetJetbrainsHeaders(req, jwt)
 
 	resp, err := HandleJWTExpiredAndRetry(req, account, httpClient, logger)
 	if err != nil {
@@ -218,9 +251,9 @@ func getQuotaDataDirect(account *core.JetbrainsAccount, httpClient *http.Client,
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, core.MaxResponseBodySize))
-		if resp.StatusCode == core.HTTPStatusUnauthorized && cacheService != nil {
-			cacheKey := cache.GenerateQuotaCacheKey(account)
-			cacheService.DeleteQuotaCache(cacheKey)
+		if resp.StatusCode == core.HTTPStatusUnauthorized && quotaCache != nil {
+			cacheKey := quotaCache.GenerateQuotaCacheKey(jwt, licenseID)
+			quotaCache.DeleteQuotaCache(cacheKey)
 		}
 		return nil, fmt.Errorf("quota check failed with status %d: %s", resp.StatusCode, string(body))
 	}

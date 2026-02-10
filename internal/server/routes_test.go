@@ -84,8 +84,17 @@ func TestServerRoutes_StatsPublicAccess(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/stats", nil)
 	w = httptest.NewRecorder()
 	server.router.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("/api/stats 应需要认证，实际 %d", w.Code)
+	}
+
+	// /api/stats with valid key should return 200
+	req = httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+	req.Header.Set(core.HeaderAuthorization, core.AuthBearerPrefix+"test-key")
+	w = httptest.NewRecorder()
+	server.router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("/api/stats 应公开访问，实际 %d", w.Code)
+		t.Fatalf("/api/stats 带认证应返回 200，实际 %d", w.Code)
 	}
 }
 

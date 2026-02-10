@@ -10,10 +10,12 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"jetbrainsai2api/internal/core"
 
 	"github.com/bytedance/sonic"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // MarshalJSON wraps Sonic for performance
@@ -91,9 +93,40 @@ func TruncateString(s string, prefixLen, suffixLen int, replacement string) stri
 	return s
 }
 
-// EstimateTokenCount estimates token count (rough: ~4 chars per token)
+// EstimateTokenCount provides a rough token count estimation.
+// Uses rune count for better accuracy with multi-byte characters.
 func EstimateTokenCount(text string) int {
-	return len(text) / 4
+	runeCount := utf8.RuneCountInString(text)
+	if runeCount == 0 {
+		return 0
+	}
+	// Rough estimation: ~0.6 tokens per rune for mixed CJK/Latin text
+	return max(1, runeCount*3/5)
+}
+
+// ParseJWTExpiry parses JWT expiry time from the token's exp claim.
+func ParseJWTExpiry(tokenStr string) (time.Time, error) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
+	}
+
+	token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not parse JWT: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return time.Time{}, fmt.Errorf("invalid JWT claims format")
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return time.Time{}, fmt.Errorf("JWT missing exp claim")
+	}
+
+	return time.Unix(int64(exp), 0), nil
 }
 
 // ParseEnvList parses comma-separated env var to trimmed slice
@@ -125,10 +158,10 @@ func GetTokenDisplayName(account *core.JetbrainsAccount) string {
 		return "Token Unknown"
 	}
 
-	account.Mu.Lock()
+	account.Lock()
 	jwt := account.JWT
 	licenseID := account.LicenseID
-	account.Mu.Unlock()
+	account.Unlock()
 
 	if jwt != "" {
 		return TruncateString(jwt, 0, 6, "Token ...")
@@ -145,9 +178,9 @@ func GetLicenseDisplayName(account *core.JetbrainsAccount) string {
 		return "Unknown"
 	}
 
-	account.Mu.Lock()
+	account.Lock()
 	authorization := account.Authorization
-	account.Mu.Unlock()
+	account.Unlock()
 
 	if authorization != "" {
 		return TruncateString(authorization, 3, 3, "*")
@@ -176,10 +209,10 @@ func GetTokenInfoFromAccount(account *core.JetbrainsAccount, quotaData *core.Jet
 		usageRate = (dailyUsed / dailyTotal) * 100
 	}
 
-	account.Mu.Lock()
+	account.Lock()
 	hasQuota := account.HasQuota
 	expiryTime := account.ExpiryTime
-	account.Mu.Unlock()
+	account.Unlock()
 
 	status := core.AccountStatusNormal
 	if !hasQuota {

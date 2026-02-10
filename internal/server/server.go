@@ -13,7 +13,6 @@ import (
 	"jetbrainsai2api/internal/cache"
 	"jetbrainsai2api/internal/config"
 	"jetbrainsai2api/internal/core"
-	logpkg "jetbrainsai2api/internal/log"
 	"jetbrainsai2api/internal/metrics"
 	"jetbrainsai2api/internal/process"
 	"jetbrainsai2api/internal/util"
@@ -34,12 +33,14 @@ type Server struct {
 	metricsService *metrics.MetricsService
 
 	validClientKeys map[string]bool
-	modelsData      core.ModelsData
+	modelsData      core.ModelList
 	modelsConfig    core.ModelsConfig
 
 	requestProcessor *process.RequestProcessor
 
 	config config.ServerConfig
+
+	rateLimiter *rateLimiter
 
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -98,6 +99,14 @@ func NewServer(cfg config.ServerConfig) (*Server, error) {
 		cfg.Logger.Info("Loaded %d client API keys", len(validClientKeys))
 	}
 
+	rateLimit := 120
+	if envRate := os.Getenv("RATE_LIMIT"); envRate != "" {
+		if parsed, parseErr := fmt.Sscanf(envRate, "%d", &rateLimit); parseErr != nil || parsed != 1 || rateLimit <= 0 {
+			cfg.Logger.Warn("Invalid RATE_LIMIT value '%s', using default 120", envRate)
+			rateLimit = 120
+		}
+	}
+
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
 	server := &Server{
@@ -112,6 +121,7 @@ func NewServer(cfg config.ServerConfig) (*Server, error) {
 		modelsConfig:     modelsConfig,
 		requestProcessor: process.NewRequestProcessor(modelsConfig, httpClient, cacheService, metricsService, cfg.Logger),
 		config:           cfg,
+		rateLimiter:      newRateLimiter(rateLimit),
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,
 	}
@@ -145,57 +155,45 @@ func createOptimizedHTTPClient(settings config.HTTPClientSettings) *http.Client 
 func (s *Server) Run() error {
 	s.setupGracefulShutdown()
 
-	s.config.Logger.Info("Starting JetBrains AI OpenAI Compatible API server on port %s", s.port)
-	return s.router.Run(":" + s.port)
+	srv := &http.Server{
+		Addr:              ":" + s.port,
+		Handler:           s.router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      5 * time.Minute, // SSE streams need longer timeout
+	}
+
+	go func() {
+		<-s.shutdownCtx.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			s.config.Logger.Error("Server shutdown error: %v", err)
+		}
+	}()
+
+	s.config.Logger.Info("Server starting on port %s", s.port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("server error: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) setupGracefulShutdown() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-c
-		s.config.Logger.Info("Shutdown signal received, cleaning up resources...")
-
+		<-quit
+		s.config.Logger.Info("Shutdown signal received, shutting down gracefully...")
 		s.shutdownCancel()
-
-		if s.metricsService != nil {
-			if err := s.metricsService.Close(); err != nil {
-				s.config.Logger.Error("Failed to close metrics service: %v", err)
-			}
-		}
-
-		if s.cache != nil {
-			_ = s.cache.Close()
-		}
-
-		if err := s.accountManager.Close(); err != nil {
-			s.config.Logger.Error("Failed to close account manager: %v", err)
-		}
-
-		if appLog, ok := s.config.Logger.(*logpkg.AppLogger); ok {
-			_ = appLog.Close()
-		}
-
-		s.config.Logger.Info("Graceful shutdown completed")
-		os.Exit(0)
 	}()
 }
 
 func (s *Server) healthCheck(c *gin.Context) {
-	c.JSON(200, gin.H{
-		"status":     "healthy",
-		"service":    "jetbrainsai2api",
-		"timestamp":  time.Now().Format(core.TimeFormatDateTime),
-		"accounts":   s.accountManager.GetAccountCount(),
-		"available":  s.accountManager.GetAvailableCount(),
-		"valid_keys": len(s.validClientKeys),
-	})
+	c.JSON(200, gin.H{"status": "healthy"})
 }
 
 func (s *Server) getStatsData(c *gin.Context) {
-	s.cache.ClearQuotaCache()
-
 	accounts := s.accountManager.GetAllAccounts()
 	var tokensInfo []gin.H
 
@@ -226,9 +224,7 @@ func (s *Server) getStatsData(c *gin.Context) {
 	}
 
 	stats := s.metricsService.GetRequestStats()
-	stats24h := s.getPeriodStatsFromHistory(stats.RequestHistory, 24)
-	stats7d := s.getPeriodStatsFromHistory(stats.RequestHistory, 24*7)
-	stats30d := s.getPeriodStatsFromHistory(stats.RequestHistory, 24*30)
+	periodStats := metrics.GetPeriodStats(stats.RequestHistory, 24, 24*7, 24*30)
 	currentQPS := s.metricsService.GetQPS()
 
 	var expiryInfo []gin.H
@@ -255,42 +251,12 @@ func (s *Server) getStatsData(c *gin.Context) {
 		"currentTime":  time.Now().Format(core.TimeFormatDateTime),
 		"currentQPS":   fmt.Sprintf("%.3f", currentQPS),
 		"totalRecords": len(stats.RequestHistory),
-		"stats24h":     stats24h,
-		"stats7d":      stats7d,
-		"stats30d":     stats30d,
+		"stats24h":     periodStats[24],
+		"stats7d":      periodStats[24*7],
+		"stats30d":     periodStats[24*30],
 		"tokensInfo":   tokensInfo,
 		"expiryInfo":   expiryInfo,
 	})
-}
-
-func (s *Server) getPeriodStatsFromHistory(history []core.RequestRecord, hours int) core.PeriodStats {
-	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour)
-	var periodRequests int64
-	var periodSuccessful int64
-	var periodResponseTime int64
-
-	for _, record := range history {
-		if record.Timestamp.After(cutoff) {
-			periodRequests++
-			periodResponseTime += record.ResponseTime
-			if record.Success {
-				periodSuccessful++
-			}
-		}
-	}
-
-	stats := core.PeriodStats{
-		Requests: periodRequests,
-	}
-
-	if periodRequests > 0 {
-		stats.SuccessRate = float64(periodSuccessful) / float64(periodRequests) * 100
-		stats.AvgResponseTime = periodResponseTime / periodRequests
-	}
-
-	stats.QPS = float64(periodRequests) / (float64(hours) * 3600.0)
-
-	return stats
 }
 
 // Close closes the server

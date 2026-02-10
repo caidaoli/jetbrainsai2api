@@ -3,6 +3,7 @@ package validate
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"jetbrainsai2api/internal/core"
@@ -101,8 +102,14 @@ func simplifyComplexTool(properties map[string]any) map[string]any {
 		},
 	}
 
+	keys := make([]string, 0, len(properties))
+	for k := range properties {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	count := 0
-	for propName, propSchema := range properties {
+	for _, propName := range keys {
 		if count >= core.MaxPreservedPropertiesInSimplifiedSchema {
 			break
 		}
@@ -111,7 +118,7 @@ func simplifyComplexTool(properties map[string]any) map[string]any {
 			validName = transformParamName(propName)
 		}
 		if isValidParamName(validName) {
-			simplified, _ := transformPropertySchema(propSchema, 0)
+			simplified, _ := transformPropertySchema(properties[propName], 0)
 			resultProps[validName] = simplified
 			count++
 		}

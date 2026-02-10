@@ -12,11 +12,7 @@ import (
 )
 
 func (s *Server) listModels(c *gin.Context) {
-	modelList := core.ModelList{
-		Object: core.ModelListObjectType,
-		Data:   s.modelsData.Data,
-	}
-	c.JSON(http.StatusOK, modelList)
+	c.JSON(http.StatusOK, s.modelsData)
 }
 
 func (s *Server) chatCompletions(c *gin.Context) {
@@ -30,7 +26,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	var request core.ChatCompletionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, "", "")
-		respondWithOpenAIError(c, http.StatusBadRequest, err.Error())
+		respondWithOpenAIError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -43,7 +39,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	account, err = s.accountManager.AcquireAccount(c.Request.Context())
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
-		respondWithOpenAIError(c, http.StatusTooManyRequests, err.Error())
+		respondWithOpenAIError(c, http.StatusTooManyRequests, "no available accounts")
 		return
 	}
 	defer s.accountManager.ReleaseAccount(account)
@@ -61,14 +57,15 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	toolsResult := s.requestProcessor.ProcessTools(&request)
 	if toolsResult.Error != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
-		respondWithOpenAIError(c, http.StatusBadRequest, toolsResult.Error.Error())
+		respondWithOpenAIError(c, http.StatusBadRequest, "invalid tool parameters")
 		return
 	}
 
 	payloadBytes, err := s.requestProcessor.BuildJetbrainsPayload(&request, jetbrainsMessages, toolsResult.Data)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
-		respondWithOpenAIError(c, http.StatusInternalServerError, err.Error())
+		s.config.Logger.Error("Failed to build payload: %v", err)
+		respondWithOpenAIError(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -76,17 +73,17 @@ func (s *Server) chatCompletions(c *gin.Context) {
 	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, account)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
-		respondWithOpenAIError(c, http.StatusInternalServerError, err.Error())
+		s.config.Logger.Error("Upstream request failed: %v", err)
+		respondWithOpenAIError(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, core.MaxResponseBodySize))
-		errorMsg := string(body)
-		s.config.Logger.Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, errorMsg)
+		s.config.Logger.Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, string(body))
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
-		c.JSON(resp.StatusCode, gin.H{"error": errorMsg})
+		c.JSON(resp.StatusCode, gin.H{"error": "upstream service error"})
 		return
 	}
 

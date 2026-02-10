@@ -52,13 +52,22 @@ func AnthropicToJetbrainsMessages(anthMessages []core.AnthropicMessage) []core.J
 			messageType = core.JetBrainsMessageTypeUser
 		case core.RoleAssistant:
 			if HasContentBlockType(msg.Content, core.ContentBlockTypeToolUse) {
+				// Extract text content first — if both text and tool_use exist, preserve both
+				textContent := extractTextFromContentBlocks(msg.Content)
+				if textContent != "" {
+					jetbrainsMessages = append(jetbrainsMessages, core.JetbrainsMessage{
+						Type:    core.JetBrainsMessageTypeAssistantText,
+						Content: textContent,
+					})
+				}
+
 				toolInfos := ExtractAllToolUse(msg.Content)
 				for _, toolInfo := range toolInfos {
 					jetbrainsMessages = append(jetbrainsMessages, core.JetbrainsMessage{
 						Type:     core.JetBrainsMessageTypeAssistantTool,
 						ID:       toolInfo.ID,
 						ToolName: toolInfo.Name,
-						Content:  "",
+						Content:  toolInfo.Input,
 					})
 				}
 				continue
@@ -108,7 +117,8 @@ func AnthropicToJetbrainsTools(anthTools []core.AnthropicTool) []core.JetbrainsT
 	return jetbrainsTools
 }
 
-// ExtractStringContent extracts string content from message
+// ExtractStringContent extracts text content from message content.
+// Only text blocks are extracted; non-text blocks (tool_use, etc.) are skipped.
 func ExtractStringContent(content any) string {
 	switch v := content.(type) {
 	case string:
@@ -121,20 +131,34 @@ func ExtractStringContent(content any) string {
 					if text, _ := blockMap["text"].(string); text != "" {
 						textParts = append(textParts, text)
 					}
-				} else if blockType == core.ContentBlockTypeToolUse {
-					if input, ok := blockMap["input"]; ok {
-						if inputJSON, err := util.MarshalJSON(input); err == nil {
-							return string(inputJSON)
-						}
-					}
 				}
 			}
 		}
 		if len(textParts) > 0 {
-			return textParts[0]
+			return strings.Join(textParts, " ")
 		}
+		return ""
 	}
 	return fmt.Sprintf("%v", content)
+}
+
+// extractTextFromContentBlocks extracts text blocks from content array, ignoring non-text blocks
+func extractTextFromContentBlocks(content any) string {
+	contentArray, ok := content.([]any)
+	if !ok {
+		return ""
+	}
+	var textParts []string
+	for _, block := range contentArray {
+		if blockMap, ok := block.(map[string]any); ok {
+			if blockType, _ := blockMap["type"].(string); blockType == core.ContentBlockTypeText {
+				if text, _ := blockMap["text"].(string); text != "" {
+					textParts = append(textParts, text)
+				}
+			}
+		}
+	}
+	return strings.Join(textParts, " ")
 }
 
 // HasContentBlockType checks if content has a specific block type
@@ -260,21 +284,33 @@ func ExtractToolInfo(content any) *core.ToolInfo {
 	return nil
 }
 
-// ExtractAllToolUse extracts all tool_use blocks from message content
-func ExtractAllToolUse(content any) []core.ToolInfo {
-	var toolInfos []core.ToolInfo
+// ToolUseInfo holds extracted tool_use block data including input
+type ToolUseInfo struct {
+	ID    string
+	Name  string
+	Input string
+}
+
+// ExtractAllToolUse extracts all tool_use blocks from message content including input
+func ExtractAllToolUse(content any) []ToolUseInfo {
+	var toolInfos []ToolUseInfo
 	if contentArray, ok := content.([]any); ok {
 		for _, block := range contentArray {
 			if blockMap, ok := block.(map[string]any); ok {
 				if blockType, _ := blockMap["type"].(string); blockType == core.ContentBlockTypeToolUse {
-					toolInfo := core.ToolInfo{}
+					info := ToolUseInfo{}
 					if id, ok := blockMap["id"].(string); ok {
-						toolInfo.ID = id
+						info.ID = id
 					}
 					if name, ok := blockMap["name"].(string); ok {
-						toolInfo.Name = name
+						info.Name = name
 					}
-					toolInfos = append(toolInfos, toolInfo)
+					if input, ok := blockMap["input"]; ok {
+						if inputJSON, err := util.MarshalJSON(input); err == nil {
+							info.Input = string(inputJSON)
+						}
+					}
+					toolInfos = append(toolInfos, info)
 				}
 			}
 		}

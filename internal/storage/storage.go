@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"jetbrainsai2api/internal/core"
@@ -28,13 +29,21 @@ func NewFileStorage(filePath string) *FileStorage {
 	return &FileStorage{filePath: filePath}
 }
 
-// SaveStats persists request statistics to the JSON file.
+// SaveStats persists request statistics to the JSON file atomically.
 func (fs *FileStorage) SaveStats(stats *core.RequestStats) error {
 	data, err := sonic.MarshalIndent(stats, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal stats: %w", err)
 	}
-	return os.WriteFile(fs.filePath, data, core.FilePermissionReadWrite)
+	tmpFile := fs.filePath + ".tmp"
+	if err := os.WriteFile(tmpFile, data, core.FilePermissionReadWrite); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := os.Rename(tmpFile, fs.filePath); err != nil {
+		_ = os.Remove(tmpFile)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+	return nil
 }
 
 // LoadStats reads request statistics from the JSON file.
@@ -97,7 +106,7 @@ func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 		key = statsRedisKey
 	}
 
-	println("Successfully connected to Redis")
+	fmt.Println("Successfully connected to Redis")
 	return &RedisStorage{client: client, ctx: ctx, key: key}, nil
 }
 
@@ -147,13 +156,13 @@ func InitStorage() (core.StorageInterface, error) {
 			Key: statsRedisKey,
 		})
 		if err != nil {
-			println("Failed to initialize Redis storage:", err.Error(), ", falling back to file storage")
+			fmt.Println("Failed to initialize Redis storage:", err.Error(), ", falling back to file storage")
 			return NewFileStorage(core.StatsFilePath), nil
 		}
-		println("Using Redis storage")
+		fmt.Println("Using Redis storage")
 		return redisStorage, nil
 	}
 
-	println("Using file storage")
+	fmt.Println("Using file storage")
 	return NewFileStorage(core.StatsFilePath), nil
 }

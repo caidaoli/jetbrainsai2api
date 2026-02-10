@@ -114,12 +114,12 @@ func TestConvertToolMessage(t *testing.T) {
 		t.Errorf("期望 tool_message")
 	}
 
-	// 缺少函数名映射
+	// 缺少函数名映射 — 应使用 fallback 名称 "unknown_tool"
 	converter2 := &MessageConverter{toolIDToFuncNameMap: make(map[string]string), logger: &core.NopLogger{}}
 	msg2 := core.ChatMessage{Role: core.RoleTool, ToolCallID: "unknown", Content: "result"}
 	result2 := converter2.convertToolMessage(msg2)
-	if result2 != nil {
-		t.Errorf("期望返回 nil")
+	if len(result2) != 1 || result2[0].ToolName != "unknown_tool" {
+		t.Errorf("期望使用 fallback 函数名 unknown_tool，实际: %v", result2)
 	}
 }
 

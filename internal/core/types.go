@@ -9,17 +9,21 @@ import (
 	"github.com/bytedance/sonic"
 )
 
+// QuotaAmount holds a single quota amount value.
+type QuotaAmount struct {
+	Amount string `json:"amount"`
+}
+
+// QuotaUsage holds current and maximum quota usage.
+type QuotaUsage struct {
+	Current QuotaAmount `json:"current"`
+	Maximum QuotaAmount `json:"maximum"`
+}
+
 // JetbrainsQuotaResponse defines the structure for the JetBrains quota API response.
 type JetbrainsQuotaResponse struct {
-	Current struct {
-		Current struct {
-			Amount string `json:"amount"`
-		} `json:"current"`
-		Maximum struct {
-			Amount string `json:"amount"`
-		} `json:"maximum"`
-	} `json:"current"`
-	Until string `json:"until"`
+	Current QuotaUsage `json:"current"`
+	Until   string     `json:"until"`
 }
 
 // Clone returns a deep copy of JetbrainsQuotaResponse.
@@ -28,24 +32,9 @@ func (q *JetbrainsQuotaResponse) Clone() *JetbrainsQuotaResponse {
 		return nil
 	}
 	return &JetbrainsQuotaResponse{
-		Current: struct {
-			Current struct {
-				Amount string `json:"amount"`
-			} `json:"current"`
-			Maximum struct {
-				Amount string `json:"amount"`
-			} `json:"maximum"`
-		}{
-			Current: struct {
-				Amount string `json:"amount"`
-			}{
-				Amount: q.Current.Current.Amount,
-			},
-			Maximum: struct {
-				Amount string `json:"amount"`
-			}{
-				Amount: q.Current.Maximum.Amount,
-			},
+		Current: QuotaUsage{
+			Current: QuotaAmount{Amount: q.Current.Current.Amount},
+			Maximum: QuotaAmount{Amount: q.Current.Maximum.Amount},
 		},
 		Until: q.Until,
 	}
@@ -99,8 +88,14 @@ type JetbrainsAccount struct {
 	HasQuota       bool       `json:"has_quota"`
 	LastQuotaCheck float64    `json:"last_quota_check"`
 	ExpiryTime     time.Time  `json:"expiry_time"`
-	Mu             sync.Mutex `json:"-"` // account-level mutex for JWT refresh and quota check
+	mu             sync.Mutex // account-level mutex for JWT refresh and quota check
 }
+
+// Lock acquires the account's mutex lock.
+func (a *JetbrainsAccount) Lock() { a.mu.Lock() }
+
+// Unlock releases the account's mutex lock.
+func (a *JetbrainsAccount) Unlock() { a.mu.Unlock() }
 
 // ModelInfo represents a single model entry in the models list.
 type ModelInfo struct {
@@ -108,11 +103,6 @@ type ModelInfo struct {
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
-}
-
-// ModelsData holds a list of available models.
-type ModelsData struct {
-	Data []ModelInfo `json:"data"`
 }
 
 // ModelList is the OpenAI-compatible model list response.
@@ -193,6 +183,13 @@ type ChatCompletionChoice struct {
 	FinishReason string      `json:"finish_reason"`
 }
 
+// OpenAIUsage represents token usage statistics in OpenAI format.
+type OpenAIUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // ChatCompletionResponse is the OpenAI-compatible non-streaming chat completion response.
 type ChatCompletionResponse struct {
 	ID      string                 `json:"id"`
@@ -200,14 +197,21 @@ type ChatCompletionResponse struct {
 	Created int64                  `json:"created"`
 	Model   string                 `json:"model"`
 	Choices []ChatCompletionChoice `json:"choices"`
-	Usage   map[string]int         `json:"usage"`
+	Usage   OpenAIUsage            `json:"usage"`
+}
+
+// StreamDelta represents a streaming response delta in OpenAI format.
+type StreamDelta struct {
+	Role      string  `json:"role,omitempty"`
+	Content   *string `json:"content,omitempty"`
+	ToolCalls []any   `json:"tool_calls,omitempty"`
 }
 
 // StreamChoice represents a single choice in an OpenAI streaming response chunk.
 type StreamChoice struct {
-	Delta        map[string]any `json:"delta"`
-	Index        int            `json:"index"`
-	FinishReason *string        `json:"finish_reason"`
+	Delta        StreamDelta `json:"delta"`
+	Index        int         `json:"index"`
+	FinishReason *string     `json:"finish_reason"`
 }
 
 // StreamResponse is the OpenAI-compatible streaming response chunk.

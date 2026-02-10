@@ -67,7 +67,7 @@ func recordRequestResultWithMetrics(m *metrics.MetricsService, success bool, sta
 }
 
 // getModelConfigOrErrorWithMetrics gets model config or returns error
-func getModelConfigOrErrorWithMetrics(c *gin.Context, m *metrics.MetricsService, modelsData core.ModelsData, modelName string, startTime time.Time, errorFormat string) *core.ModelInfo {
+func getModelConfigOrErrorWithMetrics(c *gin.Context, m *metrics.MetricsService, modelsData core.ModelList, modelName string, startTime time.Time, errorFormat string) *core.ModelInfo {
 	for _, model := range modelsData.Data {
 		if model.ID == modelName {
 			return &model

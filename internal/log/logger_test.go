@@ -129,7 +129,7 @@ func TestContainsPathTraversal(t *testing.T) {
 		{"正常路径", "/var/log/app.log", false},
 		{"包含..", "/var/../etc/passwd", true},
 		{"包含../", "../secret.txt", true},
-		{"包含./", "./local.log", true},
+		{"包含./", "./local.log", false},
 		{"Windows上级目录", "..\\config.ini", true},
 		{"空路径", "", false},
 		{"文件名包含点", "/var/log/app.2024.log", false},

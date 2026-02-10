@@ -184,10 +184,10 @@ func TestEstimateTokenCount(t *testing.T) {
 		expected int
 	}{
 		{"空字符串", "", 0},
-		{"4个字符", "test", 1},
-		{"8个字符", "testtest", 2},
-		{"短于4个字符", "hi", 0},
-		{"长文本", strings.Repeat("a", 100), 25},
+		{"4个字符", "test", 2},
+		{"8个字符", "testtest", 4},
+		{"短于4个字符", "hi", 1},
+		{"长文本", strings.Repeat("a", 100), 60},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -12,7 +12,6 @@ import (
 	"jetbrainsai2api/internal/metrics"
 	"jetbrainsai2api/internal/util"
 
-	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 )
 
@@ -43,19 +42,6 @@ func (s *anthropicStreamingToolState) appendArgs(delta string) {
 	s.rawArgs.WriteString(delta)
 }
 
-func (s *anthropicStreamingToolState) parsedInput() map[string]any {
-	args := strings.TrimSpace(s.rawArgs.String())
-	if args == "" {
-		return map[string]any{}
-	}
-
-	var parsed map[string]any
-	if err := sonic.Unmarshal([]byte(args), &parsed); err != nil {
-		return map[string]any{"arguments": args}
-	}
-	return parsed
-}
-
 func writeAnthropicSSEEvent(c *gin.Context, eventName string, payload []byte) error {
 	if _, err := c.Writer.Write([]byte("event: " + eventName + "\n")); err != nil {
 		return err
@@ -68,8 +54,6 @@ func writeAnthropicSSEEvent(c *gin.Context, eventName string, payload []byte) er
 }
 
 func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *core.AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, m *metrics.MetricsService, logger core.Logger) {
-	defer func() { _ = resp.Body.Close() }()
-
 	setStreamingHeaders(c, core.APIFormatAnthropic)
 
 	messageStartData := convert.GenerateAnthropicStreamResponse(core.StreamEventTypeMessageStart, "", 0)
@@ -125,7 +109,7 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 				Type:  core.ContentBlockTypeToolUse,
 				ID:    toolState.id,
 				Name:  toolState.name,
-				Input: toolState.parsedInput(),
+				Input: map[string]any{},
 			},
 		}
 
@@ -140,6 +124,33 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 
 		toolState.started = true
 		return nil
+	}
+
+	sendToolInputDelta := func() error {
+		if !toolState.started {
+			return nil
+		}
+
+		inputJSON := strings.TrimSpace(toolState.rawArgs.String())
+		if inputJSON == "" {
+			inputJSON = "{}"
+		}
+
+		deltaPayload := map[string]any{
+			"type":  core.StreamEventTypeContentBlockDelta,
+			"index": toolState.index,
+			"delta": map[string]any{
+				"type":         "input_json_delta",
+				"partial_json": inputJSON,
+			},
+		}
+
+		data, err := util.MarshalJSON(deltaPayload)
+		if err != nil {
+			return err
+		}
+
+		return writeAnthropicSSEEvent(c, core.StreamEventTypeContentBlockDelta, data)
 	}
 
 	stopToolBlock := func() error {
@@ -172,9 +183,13 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 		if err := startToolBlock(); err != nil {
 			return err
 		}
+		if err := sendToolInputDelta(); err != nil {
+			return err
+		}
 		if err := stopToolBlock(); err != nil {
 			return err
 		}
+		toolState.id = ""
 		return nil
 	}
 
@@ -284,8 +299,6 @@ func handleAnthropicStreamingResponseWithMetrics(c *gin.Context, resp *http.Resp
 }
 
 func handleAnthropicNonStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, anthReq *core.AnthropicMessagesRequest, startTime time.Time, accountIdentifier string, m *metrics.MetricsService, logger core.Logger) {
-	defer func() { _ = resp.Body.Close() }()
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, core.MaxResponseBodySize))
 	if err != nil {
 		metrics.RecordFailureWithMetrics(m, startTime, anthReq.Model, accountIdentifier)
@@ -299,8 +312,9 @@ func handleAnthropicNonStreamingResponseWithMetrics(c *gin.Context, resp *http.R
 	anthResp, err := convert.ParseJetbrainsToAnthropicDirect(body, anthReq.Model, logger)
 	if err != nil {
 		metrics.RecordFailureWithMetrics(m, startTime, anthReq.Model, accountIdentifier)
+		logger.Error("Failed to parse response: %v", err)
 		respondWithAnthropicError(c, http.StatusInternalServerError, core.AnthropicErrorAPI,
-			fmt.Sprintf("Failed to parse response: %v", err))
+			"internal server error")
 		return
 	}
 

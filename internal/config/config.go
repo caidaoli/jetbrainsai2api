@@ -2,12 +2,10 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"sort"
 	"time"
 
-	"jetbrainsai2api/internal/account"
 	"jetbrainsai2api/internal/core"
 	"jetbrainsai2api/internal/util"
 
@@ -49,8 +47,8 @@ func DefaultHTTPClientSettings() HTTPClientSettings {
 }
 
 // LoadModels loads model data for API response
-func LoadModels(path string, logger core.Logger) (core.ModelsData, error) {
-	var result core.ModelsData
+func LoadModels(path string, logger core.Logger) (core.ModelList, error) {
+	var result core.ModelList
 
 	config, err := LoadModelsConfig(path)
 	if err != nil {
@@ -72,6 +70,8 @@ func LoadModels(path string, logger core.Logger) (core.ModelsData, error) {
 			OwnedBy: core.ModelOwner,
 		})
 	}
+
+	result.Object = core.ModelListObjectType
 
 	logger.Info("Loaded %d models from %s", len(config.Models), path)
 	return result, nil
@@ -105,7 +105,7 @@ func LoadModelsConfig(path string) (core.ModelsConfig, error) {
 }
 
 // GetModelItem finds a model by ID
-func GetModelItem(modelsData core.ModelsData, modelID string) *core.ModelInfo {
+func GetModelItem(modelsData core.ModelList, modelID string) *core.ModelInfo {
 	for _, model := range modelsData.Data {
 		if model.ID == modelID {
 			return &model
@@ -114,8 +114,8 @@ func GetModelItem(modelsData core.ModelsData, modelID string) *core.ModelInfo {
 	return nil
 }
 
-// GetModelsConfig loads both ModelsData and ModelsConfig
-func GetModelsConfig(path string, logger core.Logger) (core.ModelsData, core.ModelsConfig, error) {
+// GetModelsConfig loads both ModelList and ModelsConfig
+func GetModelsConfig(path string, logger core.Logger) (core.ModelList, core.ModelsConfig, error) {
 	modelsData, err := LoadModels(path, logger)
 	if err != nil {
 		return modelsData, core.ModelsConfig{}, fmt.Errorf("failed to load models: %w", err)
@@ -138,7 +138,7 @@ func LoadServerConfigFromEnv(logger core.Logger) (ServerConfig, error) {
 		logger.Info("Loaded %d client API keys", len(clientAPIKeys))
 	}
 
-	jetbrainsAccounts := LoadJetbrainsAccountsFromEnv()
+	jetbrainsAccounts := LoadJetbrainsAccountsFromEnv(logger)
 	if len(jetbrainsAccounts) == 0 {
 		logger.Warn("No JetBrains accounts configured")
 	} else {
@@ -161,7 +161,7 @@ func LoadServerConfigFromEnv(logger core.Logger) (ServerConfig, error) {
 }
 
 // LoadJetbrainsAccountsFromEnv loads JetBrains accounts from environment variables
-func LoadJetbrainsAccountsFromEnv() []core.JetbrainsAccount {
+func LoadJetbrainsAccountsFromEnv(logger core.Logger) []core.JetbrainsAccount {
 	var accounts []core.JetbrainsAccount
 
 	licenseIDs := util.ParseEnvList(os.Getenv("JETBRAINS_LICENSE_IDS"))
@@ -204,21 +204,21 @@ func LoadJetbrainsAccountsFromEnv() []core.JetbrainsAccount {
 				LastQuotaCheck: 0,
 			})
 
-			if expiry, err := account.ParseJWTExpiry(jwtToken); err != nil {
-				log.Printf("[WARN] 静态JWT #%d 解析失败: %v", i+1, err)
+			if expiry, err := util.ParseJWTExpiry(jwtToken); err != nil {
+				logger.Warn("静态JWT #%d 解析失败: %v", i+1, err)
 			} else {
 				accounts[len(accounts)-1].ExpiryTime = expiry
 				if time.Now().After(expiry) {
-					log.Printf("[WARN] 静态JWT #%d 已过期 (过期时间: %s)", i+1, expiry.Format(time.RFC3339))
+					logger.Warn("静态JWT #%d 已过期 (过期时间: %s)", i+1, expiry.Format(time.RFC3339))
 				} else {
-					log.Printf("[INFO] 静态JWT #%d 将于 %s 过期", i+1, expiry.Format(time.RFC3339))
+					logger.Info("静态JWT #%d 将于 %s 过期", i+1, expiry.Format(time.RFC3339))
 				}
 			}
 		}
 	}
 
 	if len(jwts) > 0 {
-		log.Printf("[WARN] 使用静态JWT模式，JWT过期后将无法自动刷新，建议使用许可证模式")
+		logger.Warn("使用静态JWT模式，JWT过期后将无法自动刷新，建议使用许可证模式")
 	}
 
 	return accounts
