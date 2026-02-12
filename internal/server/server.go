@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -261,6 +262,29 @@ func (s *Server) getStatsData(c *gin.Context) {
 
 // Close closes the server
 func (s *Server) Close() error {
-	s.shutdownCancel()
-	return s.accountManager.Close()
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
+
+	var closeErr error
+
+	if s.accountManager != nil {
+		if err := s.accountManager.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close account manager: %w", err))
+		}
+	}
+
+	if s.metricsService != nil {
+		if err := s.metricsService.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close metrics service: %w", err))
+		}
+	}
+
+	if s.cache != nil {
+		if err := s.cache.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close cache service: %w", err))
+		}
+	}
+
+	return closeErr
 }

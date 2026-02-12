@@ -19,11 +19,11 @@ func (s *Server) setupRoutes() {
 	// Public routes (no auth)
 	s.router.GET("/", metrics.ShowStatsPage)
 	s.router.GET("/health", s.healthCheck)
+	s.router.GET("/api/stats", s.getStatsData)
 
 	// Protected admin routes (auth required)
 	admin := s.router.Group("/")
 	admin.Use(s.authenticateClient)
-	admin.GET("/api/stats", s.getStatsData)
 	admin.GET("/log", metrics.StreamLog)
 
 	// API routes (auth required)

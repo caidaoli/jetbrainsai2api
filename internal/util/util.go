@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -15,7 +16,6 @@ import (
 	"jetbrainsai2api/internal/core"
 
 	"github.com/bytedance/sonic"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // MarshalJSON wraps Sonic for performance
@@ -111,22 +111,33 @@ func ParseJWTExpiry(tokenStr string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
 	}
 
-	token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return time.Time{}, fmt.Errorf("could not parse JWT: %w", err)
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return time.Time{}, fmt.Errorf("invalid JWT claims format")
+	claims := make(map[string]any)
+	if err := sonic.Unmarshal(payload, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("could not parse JWT: %w", err)
 	}
 
-	exp, ok := claims["exp"].(float64)
-	if !ok {
+	var expUnix int64
+	switch v := claims["exp"].(type) {
+	case float64:
+		expUnix = int64(v)
+	case float32:
+		expUnix = int64(v)
+	case int:
+		expUnix = int64(v)
+	case int64:
+		expUnix = v
+	case int32:
+		expUnix = int64(v)
+	default:
 		return time.Time{}, fmt.Errorf("JWT missing exp claim")
 	}
 
-	return time.Unix(int64(exp), 0), nil
+	return time.Unix(expUnix, 0), nil
 }
 
 // ParseEnvList parses comma-separated env var to trimmed slice

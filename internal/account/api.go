@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"jetbrainsai2api/internal/core"
@@ -13,7 +12,6 @@ import (
 	"jetbrainsai2api/internal/util"
 
 	"github.com/bytedance/sonic"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // SetAccountQuotaStatus thread-safe update of account quota status
@@ -90,27 +88,7 @@ func EnsureValidJWT(account *core.JetbrainsAccount, httpClient *http.Client, log
 
 // ParseJWTExpiry parses JWT expiry time
 func ParseJWTExpiry(tokenStr string) (time.Time, error) {
-	parts := strings.Split(tokenStr, ".")
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
-	}
-
-	token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
-	if err != nil {
-		return time.Time{}, fmt.Errorf("could not parse JWT: %w", err)
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return time.Time{}, fmt.Errorf("invalid JWT claims format")
-	}
-
-	exp, ok := claims["exp"].(float64)
-	if !ok {
-		return time.Time{}, fmt.Errorf("JWT missing exp claim")
-	}
-
-	return time.Unix(int64(exp), 0), nil
+	return util.ParseJWTExpiry(tokenStr)
 }
 
 // RefreshJetbrainsJWT refreshes JWT for a JetBrains account
@@ -149,19 +127,10 @@ func RefreshJetbrainsJWT(account *core.JetbrainsAccount, httpClient *http.Client
 	tokenStr, _ := data["token"].(string)
 
 	if state == "PAID" && tokenStr != "" {
-		parts := strings.Split(tokenStr, ".")
-		if len(parts) != 3 {
-			return fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
-		}
-
 		var expiryTime time.Time
-		token, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
+		expiryTime, err := util.ParseJWTExpiry(tokenStr)
 		if err != nil {
 			logger.Warn("could not parse JWT: %v", err)
-		} else if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			if exp, ok := claims["exp"].(float64); ok {
-				expiryTime = time.Unix(int64(exp), 0)
-			}
 		}
 
 		account.Lock()
