@@ -116,6 +116,11 @@ func withPanicRecoveryWithMetrics(
 
 // sendWithRetry sends an upstream request, retrying with different accounts on 477 (quota exhausted).
 // Returns the response, the account used (caller must release), or an error if all attempts fail.
+//
+// Design note: handler_openai and handler_anthropic share the retry loop via sendWithRetry but
+// intentionally keep format-specific error responses separate (OpenAI uses 2-param, Anthropic uses
+// 3-param error helpers with different JSON shapes). Abstracting further would require callback/
+// interface machinery that adds complexity without meaningful DRY benefit (~15 lines overlap).
 func (s *Server) sendWithRetry(ctx context.Context, payloadBytes []byte, logger core.Logger) (*http.Response, *core.JetbrainsAccount, error) {
 	maxRetries := min(s.accountManager.GetAccountCount(), core.MaxUpstreamRetries)
 

@@ -75,6 +75,57 @@ func ProcessJetbrainsStream(ctx context.Context, body io.Reader, logger core.Log
 	return nil
 }
 
+// openaiStreamFinisher encapsulates the repeated tool-calls-delta + finish-chunk + SSE-done sequence.
+type openaiStreamFinisher struct {
+	writer         gin.ResponseWriter
+	logger         core.Logger
+	streamID       string
+	model          string
+	firstChunkSent *bool
+}
+
+func (f *openaiStreamFinisher) sendToolCallsAndFinish(toolCalls []any, finishReason string) {
+	if len(toolCalls) > 0 {
+		delta := core.StreamDelta{
+			ToolCalls: toolCalls,
+		}
+		if !*f.firstChunkSent {
+			delta.Role = core.RoleAssistant
+			*f.firstChunkSent = true
+		}
+		streamResp := core.StreamResponse{
+			ID:      f.streamID,
+			Object:  core.ChatCompletionChunkObjectType,
+			Created: time.Now().Unix(),
+			Model:   f.model,
+			Choices: []core.StreamChoice{{Delta: delta}},
+		}
+		respJSON, err := util.MarshalJSON(streamResp)
+		if err != nil {
+			f.logger.Warn("Failed to marshal tool call response: %v", err)
+		} else {
+			_, _ = writeSSEData(f.writer, respJSON)
+			f.writer.Flush()
+		}
+	}
+
+	finalResp := core.StreamResponse{
+		ID:      f.streamID,
+		Object:  core.ChatCompletionChunkObjectType,
+		Created: time.Now().Unix(),
+		Model:   f.model,
+		Choices: []core.StreamChoice{{Delta: core.StreamDelta{}, FinishReason: stringPtr(finishReason)}},
+	}
+	respJSON, err := util.MarshalJSON(finalResp)
+	if err != nil {
+		f.logger.Warn("Failed to marshal final response: %v", err)
+	} else {
+		_, _ = writeSSEData(f.writer, respJSON)
+	}
+	_, _ = writeSSEDone(f.writer)
+	f.writer.Flush()
+}
+
 func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, request core.ChatCompletionRequest, startTime time.Time, accountIdentifier string, m *metrics.MetricsService, logger core.Logger) {
 	setStreamingHeaders(c, core.APIFormatOpenAI)
 
@@ -84,6 +135,14 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	var currentTool map[string]any
 	var toolCalls []any
 	streamFinished := false
+
+	finisher := &openaiStreamFinisher{
+		writer:         c.Writer,
+		logger:         logger,
+		streamID:       streamID,
+		model:          request.Model,
+		firstChunkSent: &firstChunkSent,
+	}
 
 	finalizeCurrentTool := func() {
 		if currentTool == nil {
@@ -206,46 +265,7 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 				finishReason = core.FinishReasonToolCalls
 			}
 
-			if len(toolCalls) > 0 {
-				delta := core.StreamDelta{
-					ToolCalls: toolCalls,
-				}
-				if !firstChunkSent {
-					delta.Role = core.RoleAssistant
-					firstChunkSent = true
-				}
-				streamResp := core.StreamResponse{
-					ID:      streamID,
-					Object:  core.ChatCompletionChunkObjectType,
-					Created: time.Now().Unix(),
-					Model:   request.Model,
-					Choices: []core.StreamChoice{{Delta: delta}},
-				}
-				respJSON, err := util.MarshalJSON(streamResp)
-				if err != nil {
-					logger.Warn("Failed to marshal tool call response: %v", err)
-					return true
-				}
-				_, _ = writeSSEData(c.Writer, respJSON)
-				c.Writer.Flush()
-			}
-
-			finalResp := core.StreamResponse{
-				ID:      streamID,
-				Object:  core.ChatCompletionChunkObjectType,
-				Created: time.Now().Unix(),
-				Model:   request.Model,
-				Choices: []core.StreamChoice{{Delta: core.StreamDelta{}, FinishReason: stringPtr(finishReason)}},
-			}
-
-			respJSON, err := util.MarshalJSON(finalResp)
-			if err != nil {
-				logger.Warn("Failed to marshal final response: %v", err)
-			} else {
-				_, _ = writeSSEData(c.Writer, respJSON)
-			}
-			_, _ = writeSSEDone(c.Writer)
-			c.Writer.Flush()
+			finisher.sendToolCallsAndFinish(toolCalls, finishReason)
 			streamFinished = true
 			return false
 		}
@@ -263,48 +283,12 @@ func handleStreamingResponseWithMetrics(c *gin.Context, resp *http.Response, req
 	if err == nil && !streamFinished {
 		finalizeCurrentTool()
 
-		if len(toolCalls) > 0 {
-			delta := core.StreamDelta{
-				ToolCalls: toolCalls,
-			}
-			if !firstChunkSent {
-				delta.Role = core.RoleAssistant
-				firstChunkSent = true
-			}
-			streamResp := core.StreamResponse{
-				ID:      streamID,
-				Object:  core.ChatCompletionChunkObjectType,
-				Created: time.Now().Unix(),
-				Model:   request.Model,
-				Choices: []core.StreamChoice{{Delta: delta}},
-			}
-			respJSON, marshalErr := util.MarshalJSON(streamResp)
-			if marshalErr != nil {
-				logger.Warn("Failed to marshal fallback tool call response: %v", marshalErr)
-			} else {
-				_, _ = writeSSEData(c.Writer, respJSON)
-			}
-		}
-
 		finishReason := core.FinishReasonStop
 		if len(toolCalls) > 0 {
 			finishReason = core.FinishReasonToolCalls
 		}
-		finalResp := core.StreamResponse{
-			ID:      streamID,
-			Object:  core.ChatCompletionChunkObjectType,
-			Created: time.Now().Unix(),
-			Model:   request.Model,
-			Choices: []core.StreamChoice{{Delta: core.StreamDelta{}, FinishReason: stringPtr(finishReason)}},
-		}
-		respJSON, marshalErr := util.MarshalJSON(finalResp)
-		if marshalErr != nil {
-			logger.Warn("Failed to marshal fallback final response: %v", marshalErr)
-		} else {
-			_, _ = writeSSEData(c.Writer, respJSON)
-		}
-		_, _ = writeSSEDone(c.Writer)
-		c.Writer.Flush()
+
+		finisher.sendToolCallsAndFinish(toolCalls, finishReason)
 	}
 
 	m.RecordRequest(err == nil, time.Since(startTime).Milliseconds(), request.Model, accountIdentifier)
