@@ -31,10 +31,18 @@ golangci-lint run                            # lint（推荐）
 ```
 cmd/server/main.go              # 入口点
 internal/
-├── core/                       # 基础类型、接口、常量（无外部依赖）
-│   ├── types.go                # 所有数据结构
+├── core/                       # 基础类型、接口、常量（无外部依赖，按领域拆分）
 │   ├── interfaces.go           # Logger/Cache/Storage/AccountManager/MetricsCollector + Nop 实现
-│   └── constants.go            # 所有常量
+│   ├── types_account.go        # 账户、统计相关类型
+│   ├── types_model.go          # 模型映射类型
+│   ├── types_openai.go         # OpenAI 请求/响应类型
+│   ├── types_jetbrains.go      # JetBrains 请求/响应类型
+│   ├── types_anthropic.go      # Anthropic 请求/响应类型
+│   ├── constants_infra.go      # 基础设施常量（HTTP、缓存、超时）
+│   ├── constants_protocol.go   # 协议常量（SSE、Content-Type）
+│   ├── constants_jetbrains.go  # JetBrains API 常量
+│   ├── constants_openai.go     # OpenAI 格式常量
+│   └── constants_anthropic.go  # Anthropic 格式常量
 ├── log/logger.go               # 日志实现
 ├── util/util.go                # 通用工具函数
 ├── cache/cache.go              # LRU + TTL 缓存，可选 Redis
