@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io"
 	"net/http"
 	"time"
 
@@ -16,7 +15,6 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 	startTime := time.Now()
 	logger := s.config.Logger
 
-	var acct *core.JetbrainsAccount
 	var resp *http.Response
 	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &resp, core.APIFormatAnthropic, logger)()
 	defer trackPerformanceWithMetrics(s.metricsService, startTime)()
@@ -54,17 +52,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 		return
 	}
 
-	var err error
-	acct, err = s.accountManager.AcquireAccount(c.Request.Context())
-	if err != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
-		respondWithAnthropicError(c, http.StatusTooManyRequests, core.AnthropicErrorRateLimit, "no available accounts")
-		return
-	}
-	defer s.accountManager.ReleaseAccount(acct)
-
-	accountIdentifier := util.GetTokenDisplayName(acct)
-
+	// Phase 1: Build payload — no account needed
 	jetbrainsMessages := convert.AnthropicToJetbrainsMessages(anthReq.Messages)
 
 	if anthReq.System != "" {
@@ -81,7 +69,7 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 
 		toolsJSON, marshalErr := util.MarshalJSON(jetbrainsTools)
 		if marshalErr != nil {
-			recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
+			recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 			respondWithAnthropicError(c, http.StatusInternalServerError, core.AnthropicErrorAPI, "failed to marshal tools")
 			return
 		}
@@ -93,27 +81,31 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 
 	payloadBytes, err := s.requestProcessor.BuildPayloadDirect(anthReq.Model, jetbrainsMessages, data)
 	if err != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 		logger.Error("Failed to build payload: %v", err)
 		respondWithAnthropicError(c, http.StatusInternalServerError, core.AnthropicErrorAPI, "internal server error")
 		return
 	}
 
+	// Phase 2: Send with retry on 477 quota exhaustion
+	var acct *core.JetbrainsAccount
 	//nolint:bodyclose // resp.Body closed below via defer
-	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, acct)
+	resp, acct, err = s.sendWithRetry(c.Request.Context(), payloadBytes, logger)
 	if err != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
-		logger.Error("Upstream request failed: %v", err)
-		respondWithAnthropicError(c, http.StatusInternalServerError, core.AnthropicErrorAPI, "upstream service error")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
+		respondWithAnthropicError(c, http.StatusTooManyRequests, core.AnthropicErrorRateLimit, "no available accounts with quota")
 		return
 	}
+	defer s.accountManager.ReleaseAccount(acct)
 	defer func() { _ = resp.Body.Close() }()
 
+	accountIdentifier := util.GetTokenDisplayName(acct)
+
+	// Phase 3: Handle upstream response
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, core.MaxResponseBodySize))
-		logger.Error("JetBrains API Error: status=%d, body=%s", resp.StatusCode, string(body))
+		errMsg := extractUpstreamErrorMessage(resp, logger)
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, accountIdentifier)
-		respondWithAnthropicError(c, resp.StatusCode, core.AnthropicErrorAPI, "upstream service error")
+		respondWithAnthropicError(c, resp.StatusCode, core.AnthropicErrorAPI, errMsg)
 		return
 	}
 

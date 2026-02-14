@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,4 +112,53 @@ func withPanicRecoveryWithMetrics(
 			}
 		}
 	}
+}
+
+// sendWithRetry sends an upstream request, retrying with different accounts on 477 (quota exhausted).
+// Returns the response, the account used (caller must release), or an error if all attempts fail.
+func (s *Server) sendWithRetry(ctx context.Context, payloadBytes []byte, logger core.Logger) (*http.Response, *core.JetbrainsAccount, error) {
+	maxRetries := min(s.accountManager.GetAccountCount(), core.MaxUpstreamRetries)
+
+	for attempt := range maxRetries {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+
+		acct, err := s.accountManager.AcquireAccount(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("no available accounts: %w", err)
+		}
+
+		resp, err := s.requestProcessor.SendUpstreamRequest(ctx, payloadBytes, acct)
+		if err != nil {
+			s.accountManager.ReleaseAccount(acct)
+			return nil, nil, err
+		}
+
+		if resp.StatusCode != core.JetBrainsStatusQuotaExhausted {
+			return resp, acct, nil
+		}
+
+		_ = resp.Body.Close()
+		s.accountManager.ReleaseAccount(acct)
+		logger.Warn("Account quota exhausted (attempt %d/%d), trying next account", attempt+1, maxRetries)
+	}
+
+	return nil, nil, fmt.Errorf("all accounts quota exhausted after %d attempts", maxRetries)
+}
+
+// extractUpstreamErrorMessage reads the upstream response body and returns an appropriate error message.
+// 4xx responses get the original upstream message (transparent to the client).
+// 5xx responses get a generic message (no internal details leaked).
+func extractUpstreamErrorMessage(resp *http.Response, logger core.Logger) string {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, core.MaxResponseBodySize))
+	logger.Error("JetBrains API Error: status=%d, body=%s", resp.StatusCode, string(body))
+
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if len(body) > 0 {
+			return string(body)
+		}
+		return fmt.Sprintf("upstream client error (status %d)", resp.StatusCode)
+	}
+	return "upstream service error"
 }

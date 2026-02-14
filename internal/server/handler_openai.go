@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io"
 	"net/http"
 	"time"
 
@@ -18,7 +17,6 @@ func (s *Server) listModels(c *gin.Context) {
 func (s *Server) chatCompletions(c *gin.Context) {
 	startTime := time.Now()
 
-	var account *core.JetbrainsAccount
 	var resp *http.Response
 	defer withPanicRecoveryWithMetrics(c, s.metricsService, startTime, &resp, core.APIFormatOpenAI, s.config.Logger)()
 	defer trackPerformanceWithMetrics(s.metricsService, startTime)()
@@ -35,17 +33,7 @@ func (s *Server) chatCompletions(c *gin.Context) {
 		return
 	}
 
-	var err error
-	account, err = s.accountManager.AcquireAccount(c.Request.Context())
-	if err != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
-		respondWithOpenAIError(c, http.StatusTooManyRequests, "no available accounts")
-		return
-	}
-	defer s.accountManager.ReleaseAccount(account)
-
-	accountIdentifier := util.GetTokenDisplayName(account)
-
+	// Phase 1: Build payload — no account needed
 	messagesResult := s.requestProcessor.ProcessMessages(request.Messages)
 	jetbrainsMessages := messagesResult.JetbrainsMessages
 
@@ -56,34 +44,38 @@ func (s *Server) chatCompletions(c *gin.Context) {
 
 	toolsResult := s.requestProcessor.ProcessTools(&request)
 	if toolsResult.Error != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
 		respondWithOpenAIError(c, http.StatusBadRequest, "invalid tool parameters")
 		return
 	}
 
 	payloadBytes, err := s.requestProcessor.BuildJetbrainsPayload(&request, jetbrainsMessages, toolsResult.Data)
 	if err != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
 		s.config.Logger.Error("Failed to build payload: %v", err)
 		respondWithOpenAIError(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
+	// Phase 2: Send with retry on 477 quota exhaustion
+	var account *core.JetbrainsAccount
 	//nolint:bodyclose // resp.Body closed below via defer
-	resp, err = s.requestProcessor.SendUpstreamRequest(c.Request.Context(), payloadBytes, account)
+	resp, account, err = s.sendWithRetry(c.Request.Context(), payloadBytes, s.config.Logger)
 	if err != nil {
-		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
-		s.config.Logger.Error("Upstream request failed: %v", err)
-		respondWithOpenAIError(c, http.StatusInternalServerError, "internal server error")
+		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
+		respondWithOpenAIError(c, http.StatusTooManyRequests, "no available accounts with quota")
 		return
 	}
+	defer s.accountManager.ReleaseAccount(account)
 	defer func() { _ = resp.Body.Close() }()
 
+	accountIdentifier := util.GetTokenDisplayName(account)
+
+	// Phase 3: Handle upstream response
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, core.MaxResponseBodySize))
-		s.config.Logger.Error("JetBrains API Error: Status %d, Body: %s", resp.StatusCode, string(body))
+		errMsg := extractUpstreamErrorMessage(resp, s.config.Logger)
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, accountIdentifier)
-		c.JSON(resp.StatusCode, gin.H{"error": "upstream service error"})
+		respondWithOpenAIError(c, resp.StatusCode, errMsg)
 		return
 	}
 

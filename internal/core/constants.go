@@ -43,6 +43,7 @@ const (
 	AccountAcquireTimeout    = 60 * time.Second
 	AccountExpiryWarningTime = 24 * time.Hour
 	JWTExpiryCheckTime       = 1 * time.Hour
+	MaxUpstreamRetries       = 3
 )
 
 // Image validation constants
