@@ -121,7 +121,7 @@ func withPanicRecoveryWithMetrics(
 // intentionally keep format-specific error responses separate (OpenAI uses 2-param, Anthropic uses
 // 3-param error helpers with different JSON shapes). Abstracting further would require callback/
 // interface machinery that adds complexity without meaningful DRY benefit (~15 lines overlap).
-func (s *Server) sendWithRetry(ctx context.Context, payloadBytes []byte, logger core.Logger) (*http.Response, *core.JetbrainsAccount, error) {
+func (s *Server) sendWithRetry(ctx context.Context, endpoint string, payloadBytes []byte, logger core.Logger) (*http.Response, *core.JetbrainsAccount, error) {
 	maxRetries := min(s.accountManager.GetAccountCount(), core.MaxUpstreamRetries)
 
 	for attempt := range maxRetries {
@@ -134,7 +134,7 @@ func (s *Server) sendWithRetry(ctx context.Context, payloadBytes []byte, logger 
 			return nil, nil, fmt.Errorf("no available accounts: %w", err)
 		}
 
-		resp, err := s.requestProcessor.SendUpstreamRequest(ctx, payloadBytes, acct)
+		resp, err := s.requestProcessor.SendUpstreamRequest(ctx, endpoint, payloadBytes, acct)
 		if err != nil {
 			s.accountManager.ReleaseAccount(acct)
 			return nil, nil, err

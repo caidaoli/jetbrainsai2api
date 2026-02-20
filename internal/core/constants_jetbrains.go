@@ -12,12 +12,13 @@ const (
 
 // JetBrains API endpoint constants
 const (
-	JetBrainsAPIBaseURL           = "https://api.jetbrains.ai"
-	JetBrainsJWTEndpoint          = JetBrainsAPIBaseURL + "/auth/jetbrains-jwt/provide-access/license/v2"
-	JetBrainsQuotaEndpoint        = JetBrainsAPIBaseURL + "/user/v5/quota/get"
-	JetBrainsChatEndpoint         = JetBrainsAPIBaseURL + "/user/v5/llm/chat/stream/v8"
-	JetBrainsStatusQuotaExhausted = 477
-	JetBrainsChatPrompt           = "ij.chat.request.new-chat-on-start"
+	JetBrainsAPIBaseURL            = "https://api.jetbrains.ai"
+	JetBrainsJWTEndpoint           = JetBrainsAPIBaseURL + "/auth/jetbrains-jwt/provide-access/license/v2"
+	JetBrainsQuotaEndpoint         = JetBrainsAPIBaseURL + "/user/v5/quota/get"
+	JetBrainsChatEndpoint          = JetBrainsAPIBaseURL + "/user/v5/llm/chat/stream/v8"
+	JetBrainsResponsesEndpoint     = JetBrainsAPIBaseURL + "/user/v5/llm/responses/stream/v8"
+	JetBrainsStatusQuotaExhausted  = 477
+	JetBrainsChatPrompt            = "ij.chat.request.new-chat-on-start"
 )
 
 // JetBrains stream event type constants

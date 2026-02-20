@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"jetbrainsai2api/internal/core"
+	"jetbrainsai2api/internal/process"
 	"jetbrainsai2api/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -57,10 +58,12 @@ func (s *Server) chatCompletions(c *gin.Context) {
 		return
 	}
 
+	endpoint := process.ResolveEndpoint(s.modelsConfig, request.Model)
+
 	// Phase 2: Send with retry on 477 quota exhaustion
 	var account *core.JetbrainsAccount
 	//nolint:bodyclose // resp.Body closed below via defer
-	resp, account, err = s.sendWithRetry(c.Request.Context(), payloadBytes, s.config.Logger)
+	resp, account, err = s.sendWithRetry(c.Request.Context(), endpoint, payloadBytes, s.config.Logger)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, request.Model, "")
 		respondWithOpenAIError(c, http.StatusTooManyRequests, "no available accounts with quota")

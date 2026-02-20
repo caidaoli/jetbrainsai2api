@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"jetbrainsai2api/internal/account"
@@ -208,16 +209,17 @@ func (p *RequestProcessor) buildPayload(
 	return payloadBytes, nil
 }
 
-// SendUpstreamRequest sends upstream request
+// SendUpstreamRequest sends upstream request to the given endpoint
 func (p *RequestProcessor) SendUpstreamRequest(
 	ctx context.Context,
+	endpoint string,
 	payloadBytes []byte,
 	acct *core.JetbrainsAccount,
 ) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		core.JetBrainsChatEndpoint,
+		endpoint,
 		bytes.NewBuffer(payloadBytes),
 	)
 	if err != nil {
@@ -250,4 +252,14 @@ func GetInternalModelName(config core.ModelsConfig, modelID string) string {
 		return internalModel
 	}
 	return modelID
+}
+
+// ResolveEndpoint returns the appropriate JetBrains API endpoint for the given model.
+// Codex models use the Responses endpoint; all others use the Chat endpoint.
+func ResolveEndpoint(config core.ModelsConfig, model string) string {
+	internal := GetInternalModelName(config, model)
+	if strings.Contains(internal, "-codex") {
+		return core.JetBrainsResponsesEndpoint
+	}
+	return core.JetBrainsChatEndpoint
 }

@@ -6,6 +6,7 @@ import (
 
 	"jetbrainsai2api/internal/convert"
 	"jetbrainsai2api/internal/core"
+	"jetbrainsai2api/internal/process"
 	"jetbrainsai2api/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -87,10 +88,12 @@ func (s *Server) anthropicMessages(c *gin.Context) {
 		return
 	}
 
+	endpoint := process.ResolveEndpoint(s.modelsConfig, anthReq.Model)
+
 	// Phase 2: Send with retry on 477 quota exhaustion
 	var acct *core.JetbrainsAccount
 	//nolint:bodyclose // resp.Body closed below via defer
-	resp, acct, err = s.sendWithRetry(c.Request.Context(), payloadBytes, logger)
+	resp, acct, err = s.sendWithRetry(c.Request.Context(), endpoint, payloadBytes, logger)
 	if err != nil {
 		recordRequestResultWithMetrics(s.metricsService, false, startTime, anthReq.Model, "")
 		respondWithAnthropicError(c, http.StatusTooManyRequests, core.AnthropicErrorRateLimit, "no available accounts with quota")
