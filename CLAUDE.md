@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 JetBrains AI 转 OpenAI/Anthropic 兼容 API 的代理服务器。支持双 API 格式（OpenAI `/v1/chat/completions` + Anthropic `/v1/messages`），账户池管理，工具调用转换。
 
-**技术栈**: Go 1.23+ (toolchain 1.24), Gin, ByteDance Sonic (JSON), Redis (可选)
+**技术栈**: Go 1.24.0 (toolchain 1.24.5), Gin, ByteDance Sonic (JSON), Redis (可选)
 
 ## 开发命令
 
@@ -107,10 +107,18 @@ Client → server.corsMiddleware → server.authenticateClient
       → handler_openai.go (OpenAI) 或 handler_anthropic.go (Anthropic)
       → process.RequestProcessor.ProcessMessages / ProcessTools
       → process.RequestProcessor.BuildJetbrainsPayload
+      → process.ResolveEndpoint（按模型选择上游端点）
       → account.AccountManager.AcquireAccount
-      → process.RequestProcessor.SendUpstreamRequest
+      → process.RequestProcessor.SendUpstreamRequest(endpoint, ...)
       → response_openai.go (OpenAI) 或 response_anthropic.go (Anthropic)
 ```
+
+### 上游端点路由
+
+JetBrains 提供两个上游端点，`ResolveEndpoint` 根据模型内部名称自动选择：
+
+- **Chat 端点** (`/user/v5/llm/chat/stream/v8`)：默认端点，绝大多数模型
+- **Responses 端点** (`/user/v5/llm/responses/stream/v8`)：codex 系列模型（内部名含 `-codex`）
 
 ### 格式转换（双向）
 
