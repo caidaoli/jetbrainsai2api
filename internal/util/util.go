@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -58,6 +59,27 @@ func CreateJetbrainsRequest(method, url string, payload any, authorization strin
 	}
 
 	return req, nil
+}
+
+// ValidateJetBrainsRequestTarget ensures outbound requests only target JetBrains official API.
+func ValidateJetBrainsRequestTarget(req *http.Request, targetType string) error {
+	if req == nil || req.URL == nil {
+		return fmt.Errorf("invalid request: missing URL")
+	}
+
+	baseURL, err := url.Parse(core.JetBrainsAPIBaseURL)
+	if err != nil {
+		return fmt.Errorf("invalid JetBrains API base URL: %w", err)
+	}
+
+	if req.URL.Scheme != baseURL.Scheme || req.URL.Host != baseURL.Host {
+		if targetType == "" {
+			targetType = "outbound"
+		}
+		return fmt.Errorf("blocked %s request target: %s", targetType, req.URL.String())
+	}
+
+	return nil
 }
 
 // ExtractTextContent extracts text from message content field

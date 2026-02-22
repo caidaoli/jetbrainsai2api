@@ -2,25 +2,25 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"jetbrainsai2api/internal/core"
 )
 
-func TestLoadModelsConfig_ValidJSON(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "models_test_*.json")
-	if err != nil {
-		t.Fatalf("创建临时文件失败: %v", err)
-	}
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
-
-	content := `{"models":{"gpt-4":"openai-gpt-4","claude-3":"anthropic-claude-3"}}`
-	if _, err := tmpFile.WriteString(content); err != nil {
+func createModelsTempFile(t *testing.T, content string) string {
+	t.Helper()
+	filePath := filepath.Join(t.TempDir(), "models.json")
+	if err := os.WriteFile(filePath, []byte(content), core.FilePermissionReadWrite); err != nil {
 		t.Fatalf("写入临时文件失败: %v", err)
 	}
-	_ = tmpFile.Close()
+	return filePath
+}
 
-	config, err := LoadModelsConfig(tmpFile.Name())
+func TestLoadModelsConfig_ValidJSON(t *testing.T) {
+	filePath := createModelsTempFile(t, `{"models":{"gpt-4":"openai-gpt-4","claude-3":"anthropic-claude-3"}}`)
+
+	config, err := LoadModelsConfig(filePath)
 	if err != nil {
 		t.Fatalf("LoadModelsConfig failed: %v", err)
 	}
@@ -35,19 +35,9 @@ func TestLoadModelsConfig_ValidJSON(t *testing.T) {
 }
 
 func TestLoadModelsConfig_ArrayFormat(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "models_test_*.json")
-	if err != nil {
-		t.Fatalf("创建临时文件失败: %v", err)
-	}
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	filePath := createModelsTempFile(t, `["model-a","model-b"]`)
 
-	content := `["model-a","model-b"]`
-	if _, err := tmpFile.WriteString(content); err != nil {
-		t.Fatalf("写入临时文件失败: %v", err)
-	}
-	_ = tmpFile.Close()
-
-	config, err := LoadModelsConfig(tmpFile.Name())
+	config, err := LoadModelsConfig(filePath)
 	if err != nil {
 		t.Fatalf("LoadModelsConfig failed: %v", err)
 	}
@@ -69,19 +59,9 @@ func TestLoadModelsConfig_NonExistentFile(t *testing.T) {
 }
 
 func TestLoadModels(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "models_test_*.json")
-	if err != nil {
-		t.Fatalf("创建临时文件失败: %v", err)
-	}
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	filePath := createModelsTempFile(t, `{"models":{"gpt-4o":"openai-gpt-4o","claude-3":"anthropic-claude-3"}}`)
 
-	content := `{"models":{"gpt-4o":"openai-gpt-4o","claude-3":"anthropic-claude-3"}}`
-	if _, err := tmpFile.WriteString(content); err != nil {
-		t.Fatalf("写入临时文件失败: %v", err)
-	}
-	_ = tmpFile.Close()
-
-	modelsData, err := LoadModels(tmpFile.Name(), &core.NopLogger{})
+	modelsData, err := LoadModels(filePath, &core.NopLogger{})
 	if err != nil {
 		t.Fatalf("LoadModels failed: %v", err)
 	}

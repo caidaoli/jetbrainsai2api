@@ -79,7 +79,7 @@ type TokenInfo struct {
 type JetbrainsAccount struct {
 	LicenseID      string     `json:"licenseId,omitempty"`
 	Authorization  string     `json:"authorization,omitempty"`
-	JWT            string     `json:"jwt,omitempty"`
+	JWT            string     `json:"jwt,omitempty"` //nolint:gosec // Runtime credential field; not a hardcoded secret.
 	LastUpdated    float64    `json:"last_updated"`
 	HasQuota       bool       `json:"has_quota"`
 	LastQuotaCheck float64    `json:"last_quota_check"`

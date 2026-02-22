@@ -108,7 +108,7 @@ func (c *LRUCache) Get(key string) (any, bool) {
 		return nil, false
 	}
 
-	if time.Now().UnixNano() > item.Expiration {
+	if time.Now().UnixNano() >= item.Expiration {
 		c.remove(item)
 		delete(c.items, key)
 		return nil, false
@@ -162,7 +162,7 @@ func (c *LRUCache) cleanupExpired() {
 
 	now := time.Now().UnixNano()
 	for key, item := range c.items {
-		if now > item.Expiration {
+		if now >= item.Expiration {
 			c.remove(item)
 			delete(c.items, key)
 		}

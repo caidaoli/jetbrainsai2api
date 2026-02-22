@@ -1,6 +1,10 @@
 package process
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +13,19 @@ import (
 
 	"github.com/bytedance/sonic"
 )
+
+type countingRoundTripper struct {
+	calls int
+}
+
+func (rt *countingRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
+	rt.calls++
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("{}")),
+		Header:     make(http.Header),
+	}, nil
+}
 
 func TestRequestProcessor_ProcessMessages(t *testing.T) {
 	c := cache.NewCacheService()
@@ -232,5 +249,32 @@ func TestGetInternalModelName(t *testing.T) {
 				t.Errorf("期望 '%s'，实际 '%s'", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestRequestProcessor_SendUpstreamRequest_BlocksNonJetBrainsHost(t *testing.T) {
+	c := cache.NewCacheService()
+	defer func() { _ = c.Close() }()
+
+	rt := &countingRoundTripper{}
+	httpClient := &http.Client{Transport: rt}
+	processor := NewRequestProcessor(core.ModelsConfig{}, httpClient, c, &core.NopMetrics{}, &core.NopLogger{})
+
+	account := &core.JetbrainsAccount{JWT: "dummy-jwt"}
+	resp, err := processor.SendUpstreamRequest(context.Background(), "http://example.com/llm", []byte(`{}`), account)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("期望返回目标地址被阻断错误，但得到 nil")
+	}
+	if resp != nil {
+		t.Fatal("阻断请求时不应返回 response")
+	}
+	if !strings.Contains(err.Error(), "blocked upstream request target") {
+		t.Fatalf("错误信息不匹配: %v", err)
+	}
+	if rt.calls != 0 {
+		t.Fatalf("请求应在发送前被阻断，实际 RoundTrip 调用次数=%d", rt.calls)
 	}
 }

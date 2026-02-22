@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -14,31 +15,28 @@ import (
 	"jetbrainsai2api/internal/storage"
 )
 
+func writeTempTestFile(t *testing.T, fileName string, content []byte) string {
+	t.Helper()
+	filePath := filepath.Join(t.TempDir(), fileName)
+	if err := os.WriteFile(filePath, content, core.FilePermissionReadWrite); err != nil {
+		t.Fatalf("写入临时文件失败: %v", err)
+	}
+	return filePath
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
-	modelsFile, err := os.CreateTemp("", "models_test_*.json")
-	if err != nil {
-		t.Fatalf("创建 models 临时文件失败: %v", err)
-	}
-	if _, err := modelsFile.WriteString(`{"models":{"gpt-4o":"openai-gpt-4o"}}`); err != nil {
-		t.Fatalf("写入 models 临时文件失败: %v", err)
-	}
-	_ = modelsFile.Close()
+	modelsPath := writeTempTestFile(t, "models.json", []byte(`{"models":{"gpt-4o":"openai-gpt-4o"}}`))
+	statsPath := writeTempTestFile(t, "stats.json", []byte(`{}`))
 
-	statsFile, err := os.CreateTemp("", "stats_test_*.json")
-	if err != nil {
-		t.Fatalf("创建 stats 临时文件失败: %v", err)
-	}
-	_ = statsFile.Close()
-
-	st := storage.NewFileStorage(statsFile.Name())
+	st := storage.NewFileStorage(statsPath)
 	cfg := config.ServerConfig{
 		Port:              "0",
 		GinMode:           "test",
 		ClientAPIKeys:     []string{"test-key"},
 		JetbrainsAccounts: []core.JetbrainsAccount{{JWT: "dummy-jwt", LastUpdated: float64(time.Now().Unix()), HasQuota: true}},
-		ModelsConfigPath:  modelsFile.Name(),
+		ModelsConfigPath:  modelsPath,
 		HTTPClientSettings: config.HTTPClientSettings{
 			MaxIdleConns:        1,
 			MaxIdleConnsPerHost: 1,
@@ -59,8 +57,6 @@ func newTestServer(t *testing.T) *Server {
 	t.Cleanup(func() {
 		_ = server.Close()
 		_ = st.Close()
-		_ = os.Remove(modelsFile.Name())
-		_ = os.Remove(statsFile.Name())
 	})
 
 	return server
@@ -135,15 +131,7 @@ func (s *spyStorage) snapshot() (int, core.RequestStats) {
 }
 
 func TestServerClose_PersistsBufferedMetrics(t *testing.T) {
-	modelsFile, err := os.CreateTemp("", "models_close_test_*.json")
-	if err != nil {
-		t.Fatalf("创建 models 临时文件失败: %v", err)
-	}
-	if _, err := modelsFile.WriteString(`{"models":{"gpt-4o":"openai-gpt-4o"}}`); err != nil {
-		t.Fatalf("写入 models 临时文件失败: %v", err)
-	}
-	_ = modelsFile.Close()
-	t.Cleanup(func() { _ = os.Remove(modelsFile.Name()) })
+	modelsPath := writeTempTestFile(t, "models_close.json", []byte(`{"models":{"gpt-4o":"openai-gpt-4o"}}`))
 
 	st := &spyStorage{}
 	cfg := config.ServerConfig{
@@ -151,7 +139,7 @@ func TestServerClose_PersistsBufferedMetrics(t *testing.T) {
 		GinMode:           "test",
 		ClientAPIKeys:     []string{"test-key"},
 		JetbrainsAccounts: []core.JetbrainsAccount{{JWT: "dummy-jwt", LastUpdated: float64(time.Now().Unix()), HasQuota: true}},
-		ModelsConfigPath:  modelsFile.Name(),
+		ModelsConfigPath:  modelsPath,
 		HTTPClientSettings: config.HTTPClientSettings{
 			MaxIdleConns:        1,
 			MaxIdleConnsPerHost: 1,
@@ -190,6 +178,17 @@ func TestServerClose_PersistsBufferedMetrics(t *testing.T) {
 	}
 	if len(afterStats.RequestHistory) != 2 {
 		t.Fatalf("关闭后应持久化完整历史，实际 history=%d", len(afterStats.RequestHistory))
+	}
+}
+
+func TestServerClose_Idempotent(t *testing.T) {
+	server := newTestServer(t)
+
+	if err := server.Close(); err != nil {
+		t.Fatalf("第一次关闭失败: %v", err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatalf("第二次关闭失败: %v", err)
 	}
 }
 

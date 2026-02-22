@@ -86,8 +86,20 @@ type RedisStorageConfig struct {
 	Key string
 }
 
+func logStorageInfo(logger core.Logger, format string, args ...any) {
+	if logger != nil {
+		logger.Info(format, args...)
+	}
+}
+
+func logStorageWarn(logger core.Logger, format string, args ...any) {
+	if logger != nil {
+		logger.Warn(format, args...)
+	}
+}
+
 // NewRedisStorage creates a new Redis-based storage instance.
-func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
+func NewRedisStorage(config RedisStorageConfig, logger core.Logger) (*RedisStorage, error) {
 	opts, err := redis.ParseURL(config.URL)
 	if err != nil {
 		return nil, err
@@ -106,7 +118,7 @@ func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 		key = statsRedisKey
 	}
 
-	fmt.Println("Successfully connected to Redis")
+	logStorageInfo(logger, "Successfully connected to Redis")
 	return &RedisStorage{client: client, ctx: ctx, key: key}, nil
 }
 
@@ -146,23 +158,23 @@ func (rs *RedisStorage) Close() error {
 	return rs.client.Close()
 }
 
-// InitStorage initializes storage (returns StorageInterface)
-func InitStorage() (core.StorageInterface, error) {
+// InitStorage initializes storage (returns StorageInterface).
+func InitStorage(logger core.Logger) (core.StorageInterface, error) {
 	redisURL := os.Getenv("REDIS_URL")
 
 	if redisURL != "" {
 		redisStorage, err := NewRedisStorage(RedisStorageConfig{
 			URL: redisURL,
 			Key: statsRedisKey,
-		})
+		}, logger)
 		if err != nil {
-			fmt.Println("Failed to initialize Redis storage:", err.Error(), ", falling back to file storage")
+			logStorageWarn(logger, "Failed to initialize Redis storage: %v, falling back to file storage", err)
 			return NewFileStorage(core.StatsFilePath), nil
 		}
-		fmt.Println("Using Redis storage")
+		logStorageInfo(logger, "Using Redis storage")
 		return redisStorage, nil
 	}
 
-	fmt.Println("Using file storage")
+	logStorageInfo(logger, "Using file storage")
 	return NewFileStorage(core.StatsFilePath), nil
 }

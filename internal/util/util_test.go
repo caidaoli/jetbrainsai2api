@@ -1,6 +1,7 @@
 package util
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -269,6 +270,85 @@ func TestGetTokenInfoFromAccount_StatusLogic(t *testing.T) {
 			}
 			if status != tt.expectedStatus {
 				t.Errorf("期望状态 '%s'，实际 '%s'", tt.expectedStatus, status)
+			}
+		})
+	}
+}
+
+func TestValidateJetBrainsRequestTarget(t *testing.T) {
+	tests := []struct {
+		name        string
+		targetType  string
+		rawURL      string
+		req         *http.Request
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "nil请求",
+			req:         nil,
+			expectError: true,
+			errorMsg:    "invalid request: missing URL",
+		},
+		{
+			name:        "缺少URL",
+			req:         &http.Request{},
+			expectError: true,
+			errorMsg:    "invalid request: missing URL",
+		},
+		{
+			name:        "非法scheme",
+			targetType:  "upstream",
+			rawURL:      "http://api.jetbrains.ai/user/v5/llm/chat/stream/v8",
+			expectError: true,
+			errorMsg:    "blocked upstream request target",
+		},
+		{
+			name:        "非法host",
+			targetType:  "outbound",
+			rawURL:      "https://example.com/user/v5/llm/chat/stream/v8",
+			expectError: true,
+			errorMsg:    "blocked outbound request target",
+		},
+		{
+			name:        "合法JetBrains地址",
+			targetType:  "outbound",
+			rawURL:      core.JetBrainsChatEndpoint,
+			expectError: false,
+		},
+		{
+			name:        "空targetType使用默认值",
+			targetType:  "",
+			rawURL:      "https://example.com/blocked",
+			expectError: true,
+			errorMsg:    "blocked outbound request target",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := tt.req
+			if req == nil && tt.rawURL != "" {
+				var err error
+				req, err = http.NewRequest(http.MethodPost, tt.rawURL, nil)
+				if err != nil {
+					t.Fatalf("创建请求失败: %v", err)
+				}
+			}
+
+			err := ValidateJetBrainsRequestTarget(req, tt.targetType)
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("期望返回错误，但得到 nil")
+				}
+				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Fatalf("错误信息不匹配，期望包含 %q，实际 %q", tt.errorMsg, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("期望成功，实际报错: %v", err)
 			}
 		})
 	}

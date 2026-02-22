@@ -131,3 +131,9 @@ func TestAuthenticateClient_XAPIKeyTakesPrecedence(t *testing.T) {
 		t.Errorf("invalid x-api-key should return 403 even with valid Bearer, got %d", w.Code)
 	}
 }
+
+func TestRateLimiter_StopIdempotent(t *testing.T) {
+	rl := newRateLimiter(10)
+	rl.Stop()
+	rl.Stop()
+}

@@ -231,7 +231,11 @@ func (p *RequestProcessor) SendUpstreamRequest(
 	req.Header.Set(core.HeaderCacheControl, core.CacheControlNoCache)
 	account.SetJetbrainsHeaders(req, acct.JWT)
 
-	resp, err := p.httpClient.Do(req)
+	if err := util.ValidateJetBrainsRequestTarget(req, "upstream"); err != nil {
+		return nil, err
+	}
+
+	resp, err := p.httpClient.Do(req) //nolint:gosec // Request target is restricted by util.ValidateJetBrainsRequestTarget.
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}

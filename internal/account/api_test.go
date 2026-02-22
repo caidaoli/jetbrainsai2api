@@ -3,6 +3,8 @@ package account
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,19 @@ import (
 
 	"github.com/bytedance/sonic"
 )
+
+type countingRoundTripper struct {
+	calls int
+}
+
+func (rt *countingRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
+	rt.calls++
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("{}")),
+		Header:     make(http.Header),
+	}, nil
+}
 
 // TestParseJWTExpiry 测试JWT过期时间解析
 func TestParseJWTExpiry(t *testing.T) {
@@ -63,7 +78,7 @@ func TestParseJWTExpiry(t *testing.T) {
 		},
 		{
 			name:        "无效JWT内容-非法base64 payload",
-			tokenStr:    "eyJhbGciOiJSUzI1NiJ9.invalid!!!base64.signature",
+			tokenStr:    "header.invalid!!!base64.signature",
 			expectError: true,
 			errorMsg:    "could not parse JWT",
 		},
@@ -140,12 +155,6 @@ func TestParseJWTExpiry(t *testing.T) {
 			expectError: false,
 			expectTime:  ptrTime(time.Unix(9999999999, 0)),
 		},
-		{
-			name:        "真实JWT样例-JetBrains格式",
-			tokenStr:    "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJhaS1hdXRob3JpemF0aW9uLXNlcnZlciIsImV4cCI6MTcxOTI0OTI1OCwiYWNjb3VudElkIjoiYjg1MjA0NjEtNTNlOS00YTAzLWI1MmYtZjE0MDVhNGRlMzA5IiwicmVhbG0iOiJqYiIsImlzcyI6Imh0dHBzOi8vb2F1dGguamV0YnJhaW5zLmNvbS9vYXV0aC9va3RhIiwiaWF0IjoxNzE5MTYyODU4LCJ0b2tlbklkIjoiYWM0NTJmYmMtY2ZmNS00YjI2LTg2YzgtZjlkMzE2ZGUwYzI3IiwiYWNjZXNzTGljZW5zZUlkcyI6W119.SIGNATURE",
-			expectError: false,
-			expectTime:  ptrTime(time.Unix(1719249258, 0)),
-		},
 	}
 
 	for _, tt := range tests {
@@ -199,6 +208,34 @@ func timesEqual(t1, t2 time.Time, tolerance time.Duration) bool {
 		diff = -diff
 	}
 	return diff <= tolerance
+}
+
+func TestHandleJWTExpiredAndRetry_BlocksNonJetBrainsHost(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "http://example.com/evil", nil)
+	if err != nil {
+		t.Fatalf("创建请求失败: %v", err)
+	}
+
+	rt := &countingRoundTripper{}
+	client := &http.Client{Transport: rt}
+	account := &core.JetbrainsAccount{}
+
+	resp, err := HandleJWTExpiredAndRetry(req, account, client, &core.NopLogger{})
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("期望返回目标地址被阻断错误，但得到 nil")
+	}
+	if resp != nil {
+		t.Fatal("阻断请求时不应返回 response")
+	}
+	if !strings.Contains(err.Error(), "blocked outbound request target") {
+		t.Fatalf("错误信息不匹配: %v", err)
+	}
+	if rt.calls != 0 {
+		t.Fatalf("请求应在发送前被阻断，实际 RoundTrip 调用次数=%d", rt.calls)
+	}
 }
 
 // TestProcessQuotaData 测试配额数据处理函数

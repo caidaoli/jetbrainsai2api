@@ -52,14 +52,21 @@ type MetricsService struct {
 	bufferFlushTimer *time.Ticker
 	recentRequests   []time.Time
 	recentMu         sync.Mutex
+	closeOnce        sync.Once
+	closeErr         error
 }
 
 // NewMetricsService creates a new MetricsService
 func NewMetricsService(config MetricsConfig) *MetricsService {
+	logger := config.Logger
+	if logger == nil {
+		logger = &core.NopLogger{}
+	}
+
 	ms := &MetricsService{
 		maxHistorySize:  config.HistorySize,
 		storage:         config.Storage,
-		logger:          config.Logger,
+		logger:          logger,
 		minSaveInterval: config.SaveInterval,
 		done:            make(chan struct{}),
 		historyBuffer:   make([]core.RequestRecord, 0, core.HistoryBatchSize),
@@ -306,15 +313,17 @@ func (ms *MetricsService) SaveStatsDebounced() {
 
 // Close saves final stats and stops
 func (ms *MetricsService) Close() error {
-	close(ms.done)
-	ms.bufferFlushTimer.Stop()
-	ms.flushBuffer()
+	ms.closeOnce.Do(func() {
+		close(ms.done)
+		ms.bufferFlushTimer.Stop()
+		ms.flushBuffer()
 
-	if ms.storage != nil {
-		stats := ms.GetRequestStats()
-		return ms.storage.SaveStats(&stats)
-	}
-	return nil
+		if ms.storage != nil {
+			stats := ms.GetRequestStats()
+			ms.closeErr = ms.storage.SaveStats(&stats)
+		}
+	})
+	return ms.closeErr
 }
 
 // RecordSuccessWithMetrics records successful request

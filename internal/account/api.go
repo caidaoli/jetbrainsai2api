@@ -43,7 +43,11 @@ func SetJetbrainsHeaders(req *http.Request, jwtToken string) {
 
 // HandleJWTExpiredAndRetry handles JWT expiration and retries the request
 func HandleJWTExpiredAndRetry(req *http.Request, account *core.JetbrainsAccount, httpClient *http.Client, logger core.Logger) (*http.Response, error) {
-	resp, err := httpClient.Do(req)
+	if err := util.ValidateJetBrainsRequestTarget(req, "outbound"); err != nil {
+		return nil, err
+	}
+
+	resp, err := httpClient.Do(req) //nolint:gosec // Request target is restricted by util.ValidateJetBrainsRequestTarget.
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +68,10 @@ func HandleJWTExpiredAndRetry(req *http.Request, account *core.JetbrainsAccount,
 		jwt := account.JWT
 		account.Unlock()
 		req.Header.Set(core.HeaderGrazieAuthJWT, jwt)
-		return httpClient.Do(req)
+		if err := util.ValidateJetBrainsRequestTarget(req, "outbound"); err != nil {
+			return nil, err
+		}
+		return httpClient.Do(req) //nolint:gosec // Request target is restricted by util.ValidateJetBrainsRequestTarget.
 	}
 
 	return resp, nil
@@ -107,7 +114,11 @@ func RefreshJetbrainsJWT(account *core.JetbrainsAccount, httpClient *http.Client
 	}
 	SetJetbrainsHeaders(req, "")
 
-	resp, err := httpClient.Do(req)
+	if err := util.ValidateJetBrainsRequestTarget(req, "outbound"); err != nil {
+		return err
+	}
+
+	resp, err := httpClient.Do(req) //nolint:gosec // Request target is restricted by util.ValidateJetBrainsRequestTarget.
 	if err != nil {
 		return err
 	}

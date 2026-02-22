@@ -28,6 +28,8 @@ type rateLimiter struct {
 	visitors map[string]*visitorInfo
 	rate     int
 	cleanup  time.Duration
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 type visitorInfo struct {
@@ -40,6 +42,7 @@ func newRateLimiter(ratePerMinute int) *rateLimiter {
 		visitors: make(map[string]*visitorInfo),
 		rate:     ratePerMinute,
 		cleanup:  5 * time.Minute,
+		done:     make(chan struct{}),
 	}
 	go rl.cleanupLoop()
 	return rl
@@ -48,15 +51,30 @@ func newRateLimiter(ratePerMinute int) *rateLimiter {
 func (rl *rateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.cleanup)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		for ip, v := range rl.visitors {
-			if time.Since(v.lastSeen) > time.Minute {
-				delete(rl.visitors, ip)
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			for ip, v := range rl.visitors {
+				if time.Since(v.lastSeen) > time.Minute {
+					delete(rl.visitors, ip)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.done:
+			return
 		}
-		rl.mu.Unlock()
 	}
+}
+
+func (rl *rateLimiter) Stop() {
+	if rl == nil {
+		return
+	}
+
+	rl.stopOnce.Do(func() {
+		close(rl.done)
+	})
 }
 
 func (rl *rateLimiter) allow(ip string) bool {

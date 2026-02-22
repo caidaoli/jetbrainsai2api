@@ -1,11 +1,36 @@
 package metrics
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"jetbrainsai2api/internal/core"
 )
+
+type countingStorage struct {
+	mu        sync.Mutex
+	saveCount int
+}
+
+func (s *countingStorage) SaveStats(_ *core.RequestStats) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saveCount++
+	return nil
+}
+
+func (s *countingStorage) LoadStats() (*core.RequestStats, error) {
+	return &core.RequestStats{}, nil
+}
+
+func (s *countingStorage) Close() error { return nil }
+
+func (s *countingStorage) getSaveCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveCount
+}
 
 func TestNewMetricsService(t *testing.T) {
 	ms := NewMetricsService(MetricsConfig{
@@ -135,5 +160,33 @@ func TestRecordFailureWithMetrics(t *testing.T) {
 	stats := ms.GetRequestStats()
 	if stats.FailedRequests != 1 {
 		t.Errorf("Expected 1 failed request, got %d", stats.FailedRequests)
+	}
+}
+
+func TestMetricsService_Close_Idempotent(t *testing.T) {
+	st := &countingStorage{}
+	ms := NewMetricsService(MetricsConfig{
+		SaveInterval: time.Second,
+		HistorySize:  10,
+		Storage:      st,
+		Logger:       &core.NopLogger{},
+	})
+
+	ms.RecordRequest(true, 10, "gpt-4", "acc1")
+
+	if err := ms.Close(); err != nil {
+		t.Fatalf("第一次关闭不应失败: %v", err)
+	}
+	firstCloseSaves := st.getSaveCount()
+	if firstCloseSaves == 0 {
+		t.Fatal("第一次关闭后应至少有一次持久化")
+	}
+
+	if err := ms.Close(); err != nil {
+		t.Fatalf("第二次关闭不应失败: %v", err)
+	}
+
+	if st.getSaveCount() != firstCloseSaves {
+		t.Fatalf("第二次 Close 不应新增持久化，第一次=%d，第二次后=%d", firstCloseSaves, st.getSaveCount())
 	}
 }

@@ -45,6 +45,7 @@ type Server struct {
 
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+	signalQuit     chan os.Signal
 }
 
 // NewServer creates a new server instance
@@ -181,12 +182,21 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) setupGracefulShutdown() {
+	if s.signalQuit != nil {
+		return
+	}
+
 	quit := make(chan os.Signal, 1)
+	s.signalQuit = quit
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-quit
-		s.config.Logger.Info("Shutdown signal received, shutting down gracefully...")
-		s.shutdownCancel()
+		select {
+		case <-quit:
+			s.config.Logger.Info("Shutdown signal received, shutting down gracefully...")
+			s.shutdownCancel()
+		case <-s.shutdownCtx.Done():
+			return
+		}
 	}()
 }
 
@@ -265,6 +275,10 @@ func (s *Server) Close() error {
 	if s.shutdownCancel != nil {
 		s.shutdownCancel()
 	}
+	if s.signalQuit != nil {
+		signal.Stop(s.signalQuit)
+		s.signalQuit = nil
+	}
 
 	var closeErr error
 
@@ -284,6 +298,10 @@ func (s *Server) Close() error {
 		if err := s.cache.Close(); err != nil {
 			closeErr = errors.Join(closeErr, fmt.Errorf("close cache service: %w", err))
 		}
+	}
+
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
 	}
 
 	return closeErr

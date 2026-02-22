@@ -10,9 +10,7 @@ import (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		println("No .env file found, using system environment variables")
-	}
+	dotenvErr := godotenv.Load()
 
 	logger := logpkg.CreateLogger()
 	defer func() {
@@ -20,9 +18,13 @@ func main() {
 			_ = appLog.Close()
 		}
 	}()
+
+	if dotenvErr != nil {
+		logger.Warn("No .env file found, using system environment variables")
+	}
 	logger.Info("Logger initialized")
 
-	storageInstance, err := storage.InitStorage()
+	storageInstance, err := storage.InitStorage(logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize storage: %v", err)
 	}

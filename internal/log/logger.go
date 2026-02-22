@@ -1,6 +1,7 @@
 package log
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -72,7 +73,8 @@ func (l *AppLogger) Fatal(format string, args ...any) {
 	if l != nil {
 		l.logger.Fatalf("[FATAL] "+format, args...)
 	} else {
-		log.Fatalf("[FATAL] "+format, args...)
+		_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("[FATAL] "+format, args...))
+		os.Exit(1)
 	}
 }
 
@@ -98,6 +100,10 @@ func containsPathTraversal(path string) bool {
 	return strings.Contains(path, "..")
 }
 
+func writeFallbackWarn(format string, args ...any) {
+	_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("[WARN] "+format, args...))
+}
+
 // createDebugFileOutput creates debug file output, falls back gracefully on failure.
 func createDebugFileOutput() (io.Writer, *os.File) {
 	debugFile := os.Getenv("DEBUG_FILE")
@@ -106,19 +112,19 @@ func createDebugFileOutput() (io.Writer, *os.File) {
 	}
 
 	if len(debugFile) > core.MaxDebugFilePathLength {
-		log.Printf("[WARN] DEBUG_FILE path too long, falling back to stdout")
+		writeFallbackWarn("DEBUG_FILE path too long, falling back to stdout")
 		return os.Stdout, nil
 	}
 
 	if containsPathTraversal(debugFile) {
-		log.Printf("[WARN] DEBUG_FILE contains path traversal characters, falling back to stdout")
+		writeFallbackWarn("DEBUG_FILE contains path traversal characters, falling back to stdout")
 		return os.Stdout, nil
 	}
 
 	//nolint:gosec // G304: debugFile from env var, validated by containsPathTraversal
 	file, err := os.OpenFile(debugFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, core.FilePermissionReadWrite)
 	if err != nil {
-		log.Printf("[WARN] Failed to open DEBUG_FILE '%s': %v, falling back to stdout", debugFile, err)
+		writeFallbackWarn("Failed to open DEBUG_FILE '%s': %v, falling back to stdout", debugFile, err)
 		return os.Stdout, nil
 	}
 
