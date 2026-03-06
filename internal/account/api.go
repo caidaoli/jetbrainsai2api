@@ -137,24 +137,24 @@ func RefreshJetbrainsJWT(account *core.JetbrainsAccount, httpClient *http.Client
 	state, _ := data["state"].(string)
 	tokenStr, _ := data["token"].(string)
 
-	if state == "PAID" && tokenStr != "" {
-		var expiryTime time.Time
-		expiryTime, err := util.ParseJWTExpiry(tokenStr)
-		if err != nil {
-			logger.Warn("could not parse JWT: %v", err)
-		}
-
-		account.Lock()
-		account.JWT = tokenStr
-		account.LastUpdated = float64(time.Now().Unix())
-		account.ExpiryTime = expiryTime
-		account.Unlock()
-
-		logger.Info("Successfully refreshed JWT for licenseId %s, expires at %s", licenseID, expiryTime.Format(time.RFC3339))
-		return nil
+	if tokenStr == "" {
+		return fmt.Errorf("JWT refresh failed: empty token, state %s", state)
 	}
 
-	return fmt.Errorf("JWT refresh failed: invalid response state %s", state)
+	var expiryTime time.Time
+	expiryTime, err = util.ParseJWTExpiry(tokenStr)
+	if err != nil {
+		logger.Warn("could not parse JWT: %v", err)
+	}
+
+	account.Lock()
+	account.JWT = tokenStr
+	account.LastUpdated = float64(time.Now().Unix())
+	account.ExpiryTime = expiryTime
+	account.Unlock()
+
+	logger.Info("Successfully refreshed JWT for licenseId %s (state=%s), expires at %s", licenseID, state, expiryTime.Format(time.RFC3339))
+	return nil
 }
 
 // ProcessQuotaData processes quota data and updates account status
